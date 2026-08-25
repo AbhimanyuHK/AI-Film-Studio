@@ -1,0 +1,11 @@
+environment: development
+ai_engine:
+  base_url: http://localhost:8001
+  timeout_seconds: 300
+models:
+  allow_unpinned: true
+storage:
+  provider: s3
+  bucket: ai-film-studio-dev
+security:
+  require_film_scope: true
