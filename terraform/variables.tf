@@ -29,3 +29,21 @@ variable "name_prefix" {
   type        = string
   default     = "aifilm"
 }
+
+variable "vpc_cidr" {
+  description = "CIDR range for the isolated film VPC"
+  type        = string
+  default     = "10.42.0.0/16"
+}
+
+variable "public_subnet_cidr" {
+  description = "CIDR for the public-facing subnet"
+  type        = string
+  default     = "10.42.1.0/24"
+}
+
+variable "availability_zone" {
+  description = "Availability zone for the initial foundation"
+  type        = string
+  default     = "us-east-1a"
+}
