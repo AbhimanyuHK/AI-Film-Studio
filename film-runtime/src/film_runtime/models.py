@@ -68,3 +68,12 @@ class FilmAsset(Base):
     content_type: Mapped[str | None] = mapped_column(String(128))
     checksum: Mapped[str | None] = mapped_column(String(256))
     metadata_json: Mapped[dict] = mapped_column('metadata', JSON, default=dict)
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = 'knowledge_chunks'
+    chunk_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    source: Mapped[str] = mapped_column(String(2048))
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column('metadata', JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
