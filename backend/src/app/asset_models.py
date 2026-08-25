@@ -5,14 +5,12 @@ from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models import Base
 
 
-class AssetBase(DeclarativeBase):
-    pass
-
-
-class AssetModel(AssetBase):
+class AssetModel(Base):
     __tablename__ = "assets"
     __table_args__ = (UniqueConstraint("film_id", "object_key", name="uq_asset_film_object_key"),)
 
@@ -25,7 +23,7 @@ class AssetModel(AssetBase):
     size_bytes: Mapped[int | None] = mapped_column(nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     version: Mapped[int] = mapped_column(nullable=False, default=1)
-    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    asset_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
