@@ -2,23 +2,33 @@
 
 Provider-neutral AI execution layer for AI Film Studio. The existing engine architecture remains unchanged: model execution is film-scoped, jobs carry client/film identity, and generated artifacts remain inside the owning film storage boundary.
 
-## Complete AI execution flow
+## Complete execution flow
 
 ```text
 Screenplay
-   -> structured analysis
-   -> character/environment bibles
-   -> storyboard / shot plan
-   -> stable shot prompts
-   -> image generation
-   -> image validation
-   -> video generation
-   -> audio / dubbing
-   -> lip-sync / subtitles
-   -> editing / final render
+ -> script analysis / storyboard reasoning
+ -> character + environment generation
+ -> storyboard / shot planning
+ -> image generation
+ -> video generation
+ -> voice / translation / dubbing
+ -> music / SFX
+ -> lip-sync / subtitles
+ -> film assembly / final render
 ```
 
-The runtime now connects the existing job contract, authorization, retry/state machine and AI pipeline through `AIService`/`FilmAIPipeline`. Provider instances are created lazily by `ProviderRegistry`, so GPU/model dependencies remain worker-only.
+## Runtime implementation
+
+The engine now has real worker-side runtime bindings in the existing architecture:
+
+- `ollama_runtime.py` — local/open-source LLM execution through Ollama HTTP.
+- `huggingface_runtime.py` — lazy Diffusers image/video execution on GPU workers.
+- `configured_runtime.py` — stage router for LLM, image, video and configurable audio workers.
+- `adapters.py` — production adapters now execute through the runtime instead of returning placeholder success responses.
+- `production_pipeline.py` — sequential end-to-end AI stage execution.
+- `provider_runtime.py` — lazy provider registry for deployment-specific runtimes.
+
+Heavy ML imports remain lazy so API/test processes do not initialize CUDA models.
 
 ## Existing architecture
 
@@ -29,131 +39,59 @@ Production Job
 AIJob validation + film authorization
       |
       v
-FilmAIPipeline
+AI adapters / ProductionFilmPipeline
       |
-      v
-AIJobExecutor
-      |
-      +--> script analysis
-      +--> image generation
-      +--> video generation
-      +--> audio generation
-      +--> lip sync
-      +--> film assembly
+      +--> Ollama (script / reasoning / translation)
+      +--> Diffusers / FLUX (images)
+      +--> Diffusers / HunyuanVideo (video)
+      +--> configured audio worker (voice / dubbing / music / SFX)
       |
       v
 Film-scoped artifacts
 ```
 
-## Provider runtime
+## Model configuration
 
-`provider_runtime.py` provides a lightweight lazy registry. Applications register a stage with a `ProviderConfig` and factory. The factory is not invoked until that stage is requested. This keeps heavy ML imports and CUDA model loading out of API startup and test collection.
+Models remain configuration-driven. Current targets include Qwen2.5-VL for screenplay/storyboard reasoning, FLUX.1-dev for image generation, HunyuanVideo for video generation and Whisper-large-v3 for transcription. Model licensing, VRAM and deployment availability must be validated before production use.
 
-Provider configuration is deployment-specific. Credentials are read from environment variables and are never stored in source code.
+The default local reasoning path uses Ollama and can be changed with `OLLAMA_ENDPOINT` and `OLLAMA_MODEL`. Audio-family stages use `AI_AUDIO_ENDPOINT` so TTS, dubbing, music, SFX and lip-sync implementations can be deployed independently without changing orchestration.
 
-Example configuration concept:
-
-```text
-stage: image_generation
-provider: diffusers
-model: FLUX.1-dev
-endpoint: optional worker endpoint
-api_key_env: optional secret variable
-```
-
-## Production stages
-
-- `script_analysis`: screenplay structure, scenes, characters, locations and shot requirements
-- `character_generation`: reference/character assets and identity references
-- `environment_generation`: location and set references
-- `storyboard`: shot-by-shot visual plan
-- `shot_generation`: normalized shot prompts/specifications
-- `image_generation`: cinematic reference/keyframe generation
-- `video_generation`: image-to-video/text-to-video generation
-- `voice_generation`: character voice tracks
-- `transcription`: source dialogue/audio transcription
-- `translation`: localized dialogue/scripts
-- `dubbing`: language-specific dialogue tracks and synchronization
-- `music_generation`: score/music tracks
-- `sfx_generation`: shot-aligned sound effects
-- `editing`: timeline assembly
-- `upscaling`: resolution enhancement
-- `final_render`: final deliverable generation
-
-## Model strategy
-
-Models remain configuration-driven rather than embedded in orchestration. Current integration targets include Qwen2.5-VL for screenplay/storyboard reasoning, FLUX.1-dev for image generation, HunyuanVideo for video generation and Whisper-large-v3 for transcription. Each deployment must validate model licensing, hardware requirements and provider availability before production use.
+See `config/runtime.env.example` for the runtime variables.
 
 ## Film isolation
 
-Every AI job carries:
-
-```text
-client_id
-film_id
-job_id
-parent_job_id
-operation
-```
-
-Authorization happens before execution and before artifact access. Generated artifacts use film-scoped storage keys. The engine must never retrieve context using a global filename or cross-film search.
+Every AI job carries `client_id`, `film_id`, `job_id`, `parent_job_id` and operation information. Authorization occurs before execution and artifact access. Storage keys remain film-scoped and the engine must never perform global cross-film context retrieval.
 
 ```text
 Film A -> Film A jobs -> Film A GPU context -> Film A storage
 Film B -> Film B jobs -> Film B GPU context -> Film B storage
 ```
 
-For high-security deployments, a separate cloud account/project, storage boundary and GPU worker pool can be provisioned per film. Shared infrastructure is only acceptable with strict tenant isolation controls.
-
 ## Artifact contract
 
-Generated artifacts should carry:
-
-```text
-client_id
-film_id
-job_id
-object_key
-content_type
-size_bytes
-sha256 checksum
-```
-
-The checksum is used for integrity verification before promotion between stages.
+Generated artifacts should carry `client_id`, `film_id`, `job_id`, `object_key`, `content_type`, `size_bytes` and SHA-256 integrity information.
 
 ## Multilingual production
 
-The engine supports the configured language catalog including Kannada, Hindi, Tamil, Telugu, Malayalam, Marathi, Bengali, English US/UK, Mandarin, Japanese and French. Localization must derive from a versioned master script; master-language assets are never overwritten.
+The language catalog supports the configured production languages. Localization derives from a versioned master script; master-language assets are never overwritten.
 
 ## Implementation status
 
-### Implemented in the existing architecture
+### Implemented
 
-- AI stage contracts
-- Film-scoped AI jobs
-- Client/film authorization
-- Request and worker context
-- Job validation
-- Retry/state machine
-- AI job executor
-- Complete AI pipeline orchestration
-- `AIService` application facade
-- Provider/model registry with lazy initialization
-- Model configuration boundaries
-- GPU worker boundary
-- Film-scoped artifact storage
-- S3 encryption/KMS support
-- Artifact integrity metadata
-- Structured screenplay analysis contracts
-- Character/environment production bibles
-- Storyboard and shot planning
-- Stable shot prompt generation
-- Film-scoped image generation contract
-- Image output validation
-- Subtitle/lip-sync/film assembly contracts
+- Film/client authorization and worker context
+- AI job contract, validation, retry and state machine
+- Existing provider registry and lazy model lifecycle
+- Runtime-backed script/LLM execution through Ollama
+- Runtime-backed image generation through Diffusers
+- Runtime-backed video generation through Diffusers
+- Production AI adapter layer
+- End-to-end production stage runner
+- Existing character, environment, storyboard, consistency and image-validation components
+- Existing transcription, language, subtitle, lip-sync and film-assembly boundaries
+- Film-scoped artifact storage and S3 encryption/KMS support
+- Runtime environment template and adapter tests
 
-### Model integrations still deployment-specific
+### Deployment bindings
 
-The engine deliberately does not download or initialize large models during repository import. A GPU deployment must bind real Qwen/vLLM, Diffusers/FLUX, HunyuanVideo, Whisper, TTS, translation and lip-sync runtimes to the provider registry. This is an infrastructure/deployment step rather than a control-plane dependency.
-
-The architecture is ready for those runtimes without another repository restructure.
+Voice/TTS, dubbing, music, SFX and specialized lip-sync engines are intentionally exposed as worker/runtime endpoints because their model choices and GPU requirements vary by deployment. The orchestration is complete and does not require another repository restructure; production deployment only needs the selected worker implementations and their model artifacts.
