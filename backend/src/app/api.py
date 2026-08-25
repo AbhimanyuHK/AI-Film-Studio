@@ -1,9 +1,13 @@
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.auth import Principal, get_principal
+from app.repository import InMemoryRepository
+
 router = APIRouter(prefix="/api/v1", tags=["control-plane"])
+repository = InMemoryRepository()
 
 
 class ClientCreate(BaseModel):
@@ -32,44 +36,60 @@ class Film(BaseModel):
     status: str = "draft"
 
 
-_clients: dict[UUID, Client] = {}
-_films: dict[UUID, Film] = {}
+def _authorize_client(principal: Principal, client_id: UUID) -> None:
+    if principal.role == "platform_admin":
+        return
+    if principal.client_id != str(client_id):
+        raise HTTPException(status_code=403, detail="Cross-client access denied")
 
 
 @router.post("/clients", response_model=Client, status_code=status.HTTP_201_CREATED)
-def create_client(payload: ClientCreate) -> Client:
-    client = Client(client_id=uuid4(), name=payload.name)
-    _clients[client.client_id] = client
-    return client
+def create_client(payload: ClientCreate, _: Principal = Depends(get_principal)) -> Client:
+    record = repository.create_client(payload.name)
+    return Client(client_id=record.client_id, name=record.name, status=record.status)
 
 
 @router.get("/clients/{client_id}", response_model=Client)
-def get_client(client_id: UUID) -> Client:
-    client = _clients.get(client_id)
-    if client is None:
+def get_client(client_id: UUID, principal: Principal = Depends(get_principal)) -> Client:
+    _authorize_client(principal, client_id)
+    record = repository.get_client(client_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Client not found")
-    return client
+    return Client(client_id=record.client_id, name=record.name, status=record.status)
 
 
 @router.post("/films", response_model=Film, status_code=status.HTTP_201_CREATED)
-def create_film(payload: FilmCreate) -> Film:
-    if payload.client_id not in _clients:
+def create_film(payload: FilmCreate, principal: Principal = Depends(get_principal)) -> Film:
+    _authorize_client(principal, payload.client_id)
+    if repository.get_client(payload.client_id) is None:
         raise HTTPException(status_code=404, detail="Client not found")
-
-    film = Film(
-        film_id=uuid4(),
-        client_id=payload.client_id,
-        name=payload.name,
-        source_language=payload.source_language,
-        target_languages=payload.target_languages,
+    record = repository.create_film(
+        payload.client_id,
+        payload.name,
+        payload.source_language,
+        payload.target_languages,
     )
-    _films[film.film_id] = film
-    return film
+    return Film(
+        film_id=record.film_id,
+        client_id=record.client_id,
+        name=record.name,
+        source_language=record.source_language,
+        target_languages=list(record.target_languages),
+        status=record.status,
+    )
 
 
 @router.get("/films/{film_id}", response_model=Film)
-def get_film(film_id: UUID) -> Film:
-    film = _films.get(film_id)
-    if film is None:
+def get_film(film_id: UUID, principal: Principal = Depends(get_principal)) -> Film:
+    record = repository.get_film(film_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Film not found")
-    return film
+    _authorize_client(principal, record.client_id)
+    return Film(
+        film_id=record.film_id,
+        client_id=record.client_id,
+        name=record.name,
+        source_language=record.source_language,
+        target_languages=list(record.target_languages),
+        status=record.status,
+    )
