@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from uuid import UUID
 
 from app.ai_engine_client import AIEngineClient
-from app.db import AsyncSessionLocal
+from app.db import session_factory
 from app.job_repository import PostgresJobRepository
 from app.models import FilmModel
 
@@ -25,6 +24,8 @@ class AIJobWorker:
         self._stop.set()
 
     async def run(self) -> None:
+        if session_factory is None:
+            raise RuntimeError("DATABASE_URL is required for AI worker execution")
         while not self._stop.is_set():
             try:
                 processed = await self.process_one()
@@ -37,7 +38,9 @@ class AIJobWorker:
                 await asyncio.sleep(self.poll_seconds)
 
     async def process_one(self) -> bool:
-        async with AsyncSessionLocal() as session:
+        if session_factory is None:
+            raise RuntimeError("DATABASE_URL is required for AI worker execution")
+        async with session_factory() as session:
             repository = PostgresJobRepository(session)
             job = await repository.claim_next_ready()
             if job is None:
@@ -53,25 +56,20 @@ class AIJobWorker:
             operation, payload = job.job_type, job.payload
 
         try:
-            result = await self.client.execute_job(
-                job_id=job_id,
-                client_id=client_id,
-                film_id=film_id,
-                operation=operation,
-                payload=payload,
-                environment_id=environment_id,
-            )
+            result = await self.client.execute_job(job_id=job_id, client_id=client_id, film_id=film_id, operation=operation, payload=payload, environment_id=environment_id)
         except Exception as exc:
-            async with AsyncSessionLocal() as session:
-                persisted = await PostgresJobRepository(session).get(job_id)
+            async with session_factory() as session:
+                repository = PostgresJobRepository(session)
+                persisted = await repository.get(job_id)
                 if persisted is not None:
-                    await PostgresJobRepository(session).fail(persisted, type(exc).__name__, retry=True)
+                    await repository.fail(persisted, type(exc).__name__, retry=True)
                     await session.commit()
             return True
 
-        async with AsyncSessionLocal() as session:
-            persisted = await PostgresJobRepository(session).get(job_id)
+        async with session_factory() as session:
+            repository = PostgresJobRepository(session)
+            persisted = await repository.get(job_id)
             if persisted is not None:
-                await PostgresJobRepository(session).complete(persisted, result)
+                await repository.complete(persisted, result)
                 await session.commit()
         return True
