@@ -27,6 +27,11 @@ class FluxPipelineAdapter:
     def generate(self, prompt: str, **kwargs: Any) -> Any:
         self.load()
         assert self._pipeline is not None
+        references = kwargs.pop("references", ())
+        if references:
+            raise NotImplementedError("reference-image conditioning requires a compatible FLUX adapter")
+        kwargs.pop("film_id", None)
+        kwargs.pop("shot_id", None)
         generator = kwargs.pop("generator", None)
         if generator is None and kwargs.get("seed") is not None:
             generator = self._make_generator(int(kwargs.pop("seed")))
