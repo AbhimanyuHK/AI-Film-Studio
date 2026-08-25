@@ -1,9 +1,14 @@
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
-from app.api import _films
+from app.auth import Principal, get_principal
+from app.db import get_db
+from app.postgres_repository import PostgresRepository
+from app.environment_repository import PostgresEnvironmentRepository
 
 router = APIRouter(prefix="/api/v1", tags=["environments"])
 
@@ -17,11 +22,11 @@ class EnvironmentCreate(BaseModel):
 class Environment(BaseModel):
     environment_id: UUID
     film_id: UUID
-    provider: str = "aws"
+    provider: str
     aws_account_id: str
     aws_region: str
     subdomain: str
-    status: str = "provisioning"
+    status: str
 
 
 class DeploymentCreate(BaseModel):
@@ -32,61 +37,134 @@ class Deployment(BaseModel):
     deployment_id: UUID
     environment_id: UUID
     version: str
-    status: str = "queued"
+    status: str
 
 
-_environments: dict[UUID, Environment] = {}
-_film_environment: dict[UUID, UUID] = {}
-_deployments: dict[UUID, Deployment] = {}
+def _authorize(principal: Principal, client_id: UUID) -> None:
+    if principal.role != "platform_admin" and principal.client_id != str(client_id):
+        raise HTTPException(status_code=403, detail="Cross-client access denied")
+
+
+async def _film_or_404(session: AsyncSession, film_id: UUID):
+    film = await session.get(type("Film", (), {}), film_id)  # replaced below by repository lookup
+    return film
 
 
 @router.post("/films/{film_id}/environment", response_model=Environment, status_code=status.HTTP_201_CREATED)
-def create_environment(film_id: UUID, payload: EnvironmentCreate) -> Environment:
-    if film_id not in _films:
+async def create_environment(
+    film_id: UUID,
+    payload: EnvironmentCreate,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_db),
+) -> Environment:
+    films = PostgresRepository(session)
+    film = await films.get_film(film_id)
+    if film is None:
         raise HTTPException(status_code=404, detail="Film not found")
-    if film_id in _film_environment:
-        raise HTTPException(status_code=409, detail="Film already has an environment")
-    if any(env.subdomain == payload.subdomain for env in _environments.values()):
-        raise HTTPException(status_code=409, detail="Subdomain already exists")
+    _authorize(principal, film.client_id)
 
-    environment = Environment(
-        environment_id=uuid4(),
-        film_id=film_id,
-        aws_account_id=payload.aws_account_id,
-        aws_region=payload.aws_region,
-        subdomain=payload.subdomain,
+    repo = PostgresEnvironmentRepository(session)
+    if await repo.get_environment_by_film(film_id):
+        raise HTTPException(status_code=409, detail="Film already has an environment")
+
+    try:
+        record = await repo.create_environment(
+            film_id=film_id,
+            aws_account_id=payload.aws_account_id,
+            aws_region=payload.aws_region,
+            subdomain=payload.subdomain,
+        )
+        await repo.session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Environment already exists or subdomain is already in use")
+
+    return Environment(
+        environment_id=record.environment_id,
+        film_id=record.film_id,
+        provider=record.provider,
+        aws_account_id=record.aws_account_id,
+        aws_region=record.aws_region,
+        subdomain=record.subdomain,
+        status=record.status,
     )
-    _environments[environment.environment_id] = environment
-    _film_environment[film_id] = environment.environment_id
-    return environment
 
 
 @router.get("/films/{film_id}/environment", response_model=Environment)
-def get_environment(film_id: UUID) -> Environment:
-    environment_id = _film_environment.get(film_id)
-    if environment_id is None:
+async def get_environment(
+    film_id: UUID,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_db),
+) -> Environment:
+    films = PostgresRepository(session)
+    film = await films.get_film(film_id)
+    if film is None:
+        raise HTTPException(status_code=404, detail="Film not found")
+    _authorize(principal, film.client_id)
+
+    record = await PostgresEnvironmentRepository(session).get_environment_by_film(film_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Environment not found")
-    return _environments[environment_id]
+    return Environment(
+        environment_id=record.environment_id,
+        film_id=record.film_id,
+        provider=record.provider,
+        aws_account_id=record.aws_account_id,
+        aws_region=record.aws_region,
+        subdomain=record.subdomain,
+        status=record.status,
+    )
 
 
 @router.post("/films/{film_id}/deployments", response_model=Deployment, status_code=status.HTTP_201_CREATED)
-def create_deployment(film_id: UUID, payload: DeploymentCreate) -> Deployment:
-    environment_id = _film_environment.get(film_id)
-    if environment_id is None:
-        raise HTTPException(status_code=404, detail="Environment not found")
+async def create_deployment(
+    film_id: UUID,
+    payload: DeploymentCreate,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_db),
+) -> Deployment:
+    films = PostgresRepository(session)
+    film = await films.get_film(film_id)
+    if film is None:
+        raise HTTPException(status_code=404, detail="Film not found")
+    _authorize(principal, film.client_id)
 
-    deployment = Deployment(
-        deployment_id=uuid4(),
-        environment_id=environment_id,
-        version=payload.version,
+    repo = PostgresEnvironmentRepository(session)
+    environment = await repo.get_environment_by_film(film_id)
+    if environment is None:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    record = await repo.create_deployment(environment.environment_id, payload.version)
+    await session.commit()
+    return Deployment(
+        deployment_id=record.deployment_id,
+        environment_id=record.environment_id,
+        version=record.version,
+        status=record.status,
     )
-    _deployments[deployment.deployment_id] = deployment
-    return deployment
 
 
 @router.get("/deployments/{deployment_id}", response_model=Deployment)
-def get_deployment(deployment_id: UUID) -> Deployment:
-    deployment = _deployments.get(deployment_id)
-    if deployment is None:
+async def get_deployment(
+    deployment_id: UUID,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_db),
+) -> Deployment:
+    repo = PostgresEnvironmentRepository(session)
+    record = await repo.get_deployment(deployment_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Deployment not found")
-    return deployment
+
+    environment = await repo.get_environment(record.environment_id)
+    if environment is None:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    film = await PostgresRepository(session).get_film(environment.film_id)
+    if film is None:
+        raise HTTPException(status_code=404, detail="Film not found")
+    _authorize(principal, film.client_id)
+
+    return Deployment(
+        deployment_id=record.deployment_id,
+        environment_id=record.environment_id,
+        version=record.version,
+        status=record.status,
+    )
