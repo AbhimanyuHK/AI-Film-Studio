@@ -1,0 +1,19 @@
+version: 1
+quality_gates:
+  screenplay:
+    required: [valid_structure, character_continuity, scene_continuity]
+  image:
+    required: [valid_output, resolution, character_consistency]
+  video:
+    required: [valid_output, duration, frame_integrity, temporal_consistency]
+  audio:
+    required: [valid_output, duration, sample_rate, speech_quality]
+  localization:
+    required: [translation_present, subtitle_sync, voice_present]
+  final_render:
+    required: [video_present, audio_present, subtitle_sync, playable_container]
+policy:
+  fail_closed: true
+  human_review_required_for:
+    - final_render
+    - safety_or_policy_failure
