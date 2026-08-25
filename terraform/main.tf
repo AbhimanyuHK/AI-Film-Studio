@@ -65,3 +65,34 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
+
+resource "aws_vpc" "film" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+}
+
+resource "aws_internet_gateway" "film" {
+  vpc_id = aws_vpc.film.id
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.film.id
+  cidr_block              = var.public_subnet_cidr
+  availability_zone       = var.availability_zone
+  map_public_ip_on_launch = false
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.film.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.film.id
+  }
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
