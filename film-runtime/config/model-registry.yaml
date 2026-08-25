@@ -1,0 +1,27 @@
+models:
+  screenplay:
+    provider: configured-by-ai-engine
+    capability: text-generation
+  image:
+    provider: configured-by-ai-engine
+    capability: image-generation
+  video:
+    provider: configured-by-ai-engine
+    capability: video-generation
+  speech_to_text:
+    provider: configured-by-ai-engine
+    capability: transcription
+  tts:
+    provider: configured-by-ai-engine
+    capability: text-to-speech
+  translation:
+    provider: configured-by-ai-engine
+    capability: translation
+  lipsync:
+    provider: configured-by-ai-engine
+    capability: lip-sync
+
+policy:
+  model_weights_are_runtime_local: true
+  cross_film_model_access: false
+  provider_credentials_in_runtime: true
