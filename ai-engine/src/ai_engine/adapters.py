@@ -46,7 +46,7 @@ class ScriptAnalysisAdapter(ModelAdapter):
 
 class ImageGenerationAdapter(ModelAdapter):
     name = "image-generation"
-    stages = ("character_generation", "environment_generation", "storyboard_image")
+    stages = ("character_generation", "environment_generation", "storyboard", "storyboard_image")
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         out = self._runtime().execute(request.stage, self._model(request.stage), request.prompt, request.parameters)
         return GenerationResult("completed", out.assets, {**out.metadata, "job_id": request.job_id, "film_id": request.film_id})
