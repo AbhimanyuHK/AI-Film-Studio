@@ -1,0 +1,15 @@
+environment: production
+ai_engine:
+  base_url: ${AI_ENGINE_URL}
+  timeout_seconds: ${AI_ENGINE_TIMEOUT_SECONDS}
+models:
+  allow_unpinned: false
+storage:
+  provider: s3
+  bucket: ${AI_ARTIFACT_BUCKET}
+security:
+  require_film_scope: true
+  require_authenticated_provider: true
+policy:
+  secrets_from_environment: true
+  human_review_before_final_render: true
