@@ -2145,3 +2145,125 @@ but:
 ```
 
 This is exactly why I would use **LangGraph + a proper distributed job queue + cloud GPU workers** for your architecture. The AI decides **what should happen**, while the compute layer decides **where and when it should run**.
+
+
+Yes. **Let's lock GCP as the cloud provider for the AI Film Studio.**
+
+We'll keep the architecture **GCP-first and single-cloud**, while writing Terraform modules cleanly enough that AWS/Azure can be added later if there's a strong reason.
+
+## 🔒 Locked architecture
+
+```text
+                    AI FILM STUDIO
+                          │
+                          ▼
+                    Cloud Run API
+                          │
+                          ▼
+                     LangGraph
+                    AI Director
+                          │
+                          ▼
+                    Job Scheduler
+                          │
+                     Pub/Sub
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+       H100 Worker     A100 Worker       L4 Worker
+          │               │               │
+          └───────────────┼───────────────┘
+                          ▼
+                    Model Runtime
+                ComfyUI / Diffusers
+                          │
+             ┌────────────┼────────────┐
+             ▼            ▼            ▼
+           Image        Video        Audio
+           Models       Models       Models
+             │            │            │
+             └────────────┼────────────┘
+                          ▼
+                         GCS
+                          │
+                 ┌────────┴────────┐
+                 ▼                 ▼
+             QA Engine         Metadata DB
+                 │              Cloud SQL
+                 ▼
+           Approved Assets
+                 │
+                 ▼
+           Film Assembly
+                 │
+                 ▼
+             Final Master
+```
+
+## GCP services
+
+| Requirement        | GCP                        |
+| ------------------ | -------------------------- |
+| API                | Cloud Run                  |
+| AI orchestration   | LangGraph                  |
+| Job queue          | Pub/Sub                    |
+| GPU compute        | Compute Engine / GKE later |
+| High-end GPU       | H100 80GB                  |
+| Medium GPU         | A100 80GB                  |
+| Utility GPU        | L4                         |
+| Object storage     | Cloud Storage              |
+| Database           | Cloud SQL PostgreSQL       |
+| Secrets            | Secret Manager             |
+| Container registry | Artifact Registry          |
+| Monitoring         | Cloud Monitoring + Logging |
+| Networking         | VPC                        |
+| IAM                | Cloud IAM                  |
+| Infrastructure     | **Terraform**              |
+| CI/CD              | GitHub Actions             |
+| Model runtime      | ComfyUI / Diffusers        |
+| Video processing   | FFmpeg                     |
+| Workflow           | LangGraph + job scheduler  |
+
+### GPU strategy
+
+We won't keep expensive GPUs running continuously.
+
+```text
+                    Pub/Sub
+                       │
+                       ▼
+                  Job Scheduler
+                       │
+             ┌─────────┼─────────┐
+             ▼         ▼         ▼
+           H100       A100       L4
+             │         │         │
+        Critical     Video       QA/
+        generation  generation  utility
+             │         │         │
+             └─────────┼─────────┘
+                       ▼
+                      GCS
+```
+
+Workers can scale up when there's work and shut down when the queue is empty.
+
+### Security baseline
+
+We'll keep production:
+
+* private GPU workers
+* least-privilege service accounts
+* Secret Manager for credentials
+* encrypted GCS buckets
+* separate dev/QA/prod projects
+* no public access to film assets
+* audit logging
+* VPC firewall restrictions
+* signed/container-controlled deployments
+* Terraform-managed infrastructure
+
+And importantly, **the film assets stay inside GCP** rather than bouncing between AWS/GCP/Azure.
+
+So from this point forward, I'll treat **GCP as the selected cloud platform for the AI Film Studio**.
+
