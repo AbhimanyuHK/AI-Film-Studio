@@ -4121,3 +4121,678 @@ Your studio team manages the platform.
 **Film A never needs to know Film B exists.**
 
 That is the architecture I would lock in before we start designing the repository, Terraform structure, AWS services, and application code.
+
+
+# AI Film Studio — Discussion Summary
+
+Here is the consolidated architecture we arrived at.
+
+## 1. Overall objective
+
+Build a **production-grade AI Film Studio SaaS** capable of taking a screenplay and producing a full-length feature film, potentially **2–3 hours**, with multilingual releases.
+
+Target languages currently discussed:
+
+### Indian
+
+* Kannada
+* Hindi
+* Telugu
+* Tamil
+* Malayalam
+* Marathi
+* Bengali
+
+### International
+
+* English — US
+* English — UK
+* Chinese
+* Japanese
+* French
+
+So the platform should support **12 language/localization outputs**.
+
+---
+
+# 2. Core business model
+
+The key decision was:
+
+> **One film = one isolated production deployment/environment.**
+
+Not a traditional multi-tenant architecture where many films share the same runtime/database/vector store.
+
+Example:
+
+```text
+AI FILM STUDIO SaaS
+        │
+        ├── Film A / Client 1
+        │
+        ├── Film B / Client 2
+        │
+        └── Film C / Client 3
+```
+
+Each film is independently provisioned.
+
+---
+
+# 3. Extreme data isolation requirement
+
+This is one of the most important requirements.
+
+**Film A must never expose information to Film B.**
+
+That includes:
+
+* Script
+* Characters
+* Character images
+* Character LoRAs
+* Voice models/clones
+* Prompts
+* Embeddings
+* RAG knowledge
+* Film knowledge graph
+* Generated images
+* Generated videos
+* Audio
+* Music
+* Metadata
+* Production information
+* Temporary files
+* Film-specific models
+
+Therefore:
+
+```text
+Film A ──────── ❌ ──────── Film B
+```
+
+There should be **no shared film data plane**.
+
+---
+
+# 4. One central SaaS application
+
+We clarified that you **do not want separate SaaS applications manually created for every film**.
+
+Instead:
+
+> **One SaaS application manages the entire platform and provisions isolated film environments automatically.**
+
+Architecture:
+
+```text
+                 AI FILM STUDIO SaaS
+                 ┌─────────────────┐
+                 │ Frontend        │
+                 │ Backend         │
+                 │ Authentication  │
+                 │ Billing         │
+                 │ Admin           │
+                 │ Deployment      │
+                 │ Terraform       │
+                 └────────┬────────┘
+                          │
+             ┌────────────┼────────────┐
+             ▼            ▼            ▼
+          Film A       Film B       Film C
+```
+
+The central SaaS is the **control plane**.
+
+---
+
+# 5. Film environments are the data plane
+
+Each film gets its own production environment.
+
+For example:
+
+```text
+Film A
+└── AWS Account A
+    ├── VPC
+    ├── Frontend
+    ├── Backend
+    ├── Database
+    ├── S3
+    ├── RAG/Vector
+    ├── GPU Workers
+    ├── Models
+    ├── Secrets
+    ├── KMS
+    └── Monitoring
+```
+
+Film B gets an entirely separate environment:
+
+```text
+Film B
+└── AWS Account B
+    ├── VPC
+    ├── Frontend
+    ├── Backend
+    ├── Database
+    ├── S3
+    ├── RAG/Vector
+    ├── GPU Workers
+    ├── Models
+    ├── Secrets
+    ├── KMS
+    └── Monitoring
+```
+
+---
+
+# 6. Separate AWS account per film
+
+You specifically requested:
+
+```text
+Film A → Account 1
+Film B → Account 2
+Film C → Account 3
+```
+
+This provides a much stronger isolation boundary than simply using different database schemas or S3 prefixes.
+
+For enterprise clients, we also discussed the possibility of:
+
+> **Client-owned AWS account/environment**
+
+where the client controls billing, IAM, KMS and data ownership while your studio software is deployed into their environment.
+
+---
+
+# 7. Subdomain per film
+
+Each film receives its own subdomain.
+
+Example:
+
+```text
+film-a.yourstudio.com
+film-b.yourstudio.com
+film-c.yourstudio.com
+```
+
+The central SaaS might be:
+
+```text
+studio.yourstudio.com
+```
+
+Flow:
+
+```text
+studio.yourstudio.com
+        │
+        │ Create Film
+        ▼
+   Deployment Manager
+        │
+        ▼
+     AWS Account
+        │
+        ▼
+   Film Environment
+        │
+        ▼
+film-a.yourstudio.com
+```
+
+---
+
+# 8. How a customer uses the studio
+
+The customer doesn't need to understand AWS or Terraform.
+
+They use:
+
+```text
+studio.yourstudio.com
+```
+
+Then:
+
+### Create Film
+
+```text
++ New Film
+```
+
+Enter:
+
+```text
+Film Name
+Client
+Source Language
+Target Languages
+Expected Duration
+Production Configuration
+```
+
+The SaaS automatically provisions the environment.
+
+Then the customer goes to:
+
+```text
+film-a.yourstudio.com
+```
+
+and manages their production.
+
+---
+
+# 9. Film production workflow
+
+The production pipeline discussed is:
+
+```text
+SCRIPT
+   ↓
+SCRIPT ANALYSIS
+   ↓
+FILM BIBLE
+   ↓
+CHARACTER BIBLE
+   ↓
+LOCATION / WORLD BIBLE
+   ↓
+CINEMATOGRAPHY BIBLE
+   ↓
+SCENE BREAKDOWN
+   ↓
+SHOT LIST
+   ↓
+STORYBOARD
+   ↓
+CHARACTER / LOCATION REFERENCES
+   ↓
+KEYFRAMES
+   ↓
+VIDEO GENERATION
+   ↓
+VIDEO QA
+   ↓
+VOICE GENERATION
+   ↓
+MUSIC / SFX
+   ↓
+LIP SYNC
+   ↓
+EDITING
+   ↓
+LOCALIZATION
+   ↓
+FINAL QA
+   ↓
+MASTER
+```
+
+---
+
+# 10. Multilingual production
+
+The visual master can be reused for localization.
+
+For example:
+
+```text
+                 VISUAL MASTER
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+     Indian         English       International
+    Languages        US/UK        Languages
+        │              │              │
+        ▼              ▼              ▼
+     Dubbing        Dubbing        Dubbing
+        │              │              │
+        └──────────────┼──────────────┘
+                       ▼
+                    Lip Sync
+                       ↓
+                  Audio Mixing
+                       ↓
+                 Final Masters
+```
+
+This avoids regenerating the entire movie visually for every language.
+
+---
+
+# 11. AI model philosophy
+
+You specifically wanted **high-quality, fully trained models**, rather than basic/lightweight models.
+
+The architecture therefore favors:
+
+* High-quality open models
+* Self-hosted inference
+* GPU infrastructure
+* Fine-tuned models where required
+* Film-specific LoRA/fine-tuning
+* Dedicated inference workers
+
+We also discussed the importance of model licensing.
+
+### Important distinction
+
+A model being "open" does **not automatically mean commercially unrestricted**.
+
+Therefore the studio needs a **model registry/licensing policy** that tracks:
+
+```text
+Model
+Version
+License
+Commercial-use permission
+Redistribution restrictions
+Attribution requirements
+Fine-tuning restrictions
+```
+
+You wanted to prefer **Apache 2.0/MIT** where possible, but we established that restricting the entire stack to those licenses may unnecessarily eliminate high-quality models.
+
+---
+
+# 12. Base models vs film-specific models
+
+A base model can potentially be common:
+
+```text
+Base Model
+    │
+    ├── Film A LoRA
+    ├── Film B LoRA
+    └── Film C LoRA
+```
+
+But the **film-specific LoRAs and fine-tuned models must remain inside the respective film environment**.
+
+Therefore:
+
+```text
+Base Model       → potentially shared
+Film LoRA        → private
+Film embeddings  → private
+Film knowledge   → private
+Film data        → private
+```
+
+---
+
+# 13. GPU architecture
+
+We discussed not keeping expensive GPUs permanently running unnecessarily.
+
+Preferred model:
+
+```text
+Film Environment
+       │
+       ▼
+Job Queue
+       │
+       ▼
+GPU Worker
+       │
+       ▼
+Generate
+       │
+       ▼
+Store Result
+       │
+       ▼
+Worker shutdown / cleanup
+```
+
+For highly confidential workloads, use **ephemeral workers** where practical.
+
+This reduces the risk of Film A's temporary data remaining on a worker that later processes Film B.
+
+---
+
+# 14. Terraform
+
+Terraform is a core part of the architecture.
+
+The SaaS doesn't manually build each environment.
+
+Instead:
+
+```text
+SaaS
+ ↓
+Deployment Manager
+ ↓
+Terraform
+ ↓
+AWS
+ ↓
+Film Environment
+```
+
+Terraform should have reusable modules:
+
+```text
+terraform/
+├── modules/
+│   ├── networking/
+│   ├── security/
+│   ├── storage/
+│   ├── database/
+│   ├── gpu/
+│   ├── application/
+│   ├── monitoring/
+│   └── dns/
+│
+└── deployments/
+    └── film-environment/
+```
+
+The SaaS supplies film/environment-specific configuration.
+
+---
+
+# 15. AWS vs GCP
+
+We initially considered GCP and AWS and decided:
+
+> **Use AWS as the primary architecture if GCP does not satisfy the required isolation/account/deployment model.**
+
+Given your latest requirement of:
+
+```text
+Film A → AWS Account 1
+Film B → AWS Account 2
+```
+
+we are now treating **AWS as the primary cloud**.
+
+The application can still be designed with infrastructure abstraction if multi-cloud becomes necessary later, but we don't need to complicate the first production version.
+
+---
+
+# 16. AWS architecture
+
+The main AWS services discussed are:
+
+| Requirement        | AWS               |
+| ------------------ | ----------------- |
+| Account management | AWS Organizations |
+| Compute            | EC2               |
+| GPU                | GPU EC2 instances |
+| Containers         | ECR + ECS/EKS     |
+| Object storage     | S3                |
+| Database           | RDS PostgreSQL    |
+| Queues             | SQS               |
+| Events             | EventBridge       |
+| Secrets            | Secrets Manager   |
+| Encryption         | KMS               |
+| DNS                | Route 53          |
+| Load balancing     | ALB               |
+| Monitoring         | CloudWatch        |
+| Audit              | CloudTrail        |
+| IAM                | IAM               |
+| Infrastructure     | Terraform         |
+| CI/CD              | GitHub Actions    |
+
+---
+
+# 17. Central SaaS database
+
+The central SaaS database should store **control-plane information**, such as:
+
+```text
+users
+clients
+films
+environments
+deployments
+AWS account mapping
+subdomains
+subscriptions
+billing
+deployment status
+permissions
+audit/deployment events
+```
+
+It should **not become the central repository for film content**.
+
+Avoid:
+
+```text
+Central DB
+ ├── Film A script
+ ├── Film B script
+ ├── Film A embeddings
+ └── Film B embeddings
+```
+
+Instead:
+
+```text
+Central DB
+ ├── Film A → Environment A
+ └── Film B → Environment B
+```
+
+The actual film data stays in its environment.
+
+---
+
+# 18. Control plane vs data plane
+
+This became the fundamental architecture.
+
+### Control Plane
+
+```text
+AI FILM STUDIO SaaS
+```
+
+Responsible for:
+
+* Users
+* Clients
+* Film creation
+* Environment provisioning
+* Deployment
+* Billing
+* Authentication
+* Platform administration
+* Terraform orchestration
+
+### Data Plane
+
+```text
+Film A Environment
+Film B Environment
+Film C Environment
+```
+
+Responsible for:
+
+* Script
+* AI agents
+* RAG
+* Characters
+* LoRAs
+* Video generation
+* Audio
+* Music
+* Editing
+* Film database
+* Film storage
+* GPU processing
+
+---
+
+# 19. Final security principle
+
+The architecture should enforce:
+
+> **The central SaaS manages film environments but does not become shared film memory.**
+
+And:
+
+> **One film's environment has no normal access path to another film's environment.**
+
+Conceptually:
+
+```text
+                    CENTRAL SaaS
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+      AWS Account A  AWS Account B  AWS Account C
+          │              │              │
+        Film A          Film B          Film C
+          │              │              │
+          X──────────────X──────────────X
+                 NO CROSSOVER
+```
+
+---
+
+# 20. Final product concept
+
+The product is therefore:
+
+> **A SaaS-based AI Film Studio that automatically provisions a fully isolated cloud production environment for every film/client.**
+
+The customer experiences **one SaaS product**.
+
+Behind the scenes:
+
+```text
+                     AI FILM STUDIO
+                         SaaS
+                          │
+                    Create Film
+                          │
+             ┌────────────┼────────────┐
+             ▼            ▼            ▼
+          Film A       Film B       Film C
+          Client 1     Client 2     Client 3
+             │            │            │
+        AWS Account   AWS Account   AWS Account
+             │            │            │
+        Dedicated     Dedicated     Dedicated
+        Environment  Environment  Environment
+             │            │            │
+        film-a.com   film-b.com   film-c.com
+```
+
+### The core architectural statement
+
+**One SaaS → many isolated film deployments → one AWS account/environment per film → one subdomain per film → zero film-data sharing.**
+
+That is the architecture we should use as the baseline for the **AI Film Studio** going forward.
