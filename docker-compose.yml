@@ -33,8 +33,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://studio:studio@postgres:5432/ai_film_studio
       AI_ENGINE_URL: http://ai-engine:8080
       AI_ENGINE_TIMEOUT_SECONDS: 300
-      AI_WORKER_POLL_SECONDS: 2
-      AI_JOB_LEASE_SECONDS: 300
       FRONTEND_CORS_ORIGINS: http://localhost:5173
     depends_on:
       postgres:
@@ -46,15 +44,13 @@ services:
 
   worker:
     build:
-      context: ./backend
-    command: ["python", "-m", "app.ai_worker_main"]
+      context: ./workers
     environment:
-      DATABASE_URL: postgresql+asyncpg://studio:studio@postgres:5432/ai_film_studio
+      DATABASE_URL: postgresql://studio:studio@postgres:5432/ai_film_studio
       AI_ENGINE_URL: http://ai-engine:8080
-      AI_ENGINE_TIMEOUT_SECONDS: 300
-      AI_WORKER_POLL_SECONDS: 2
-      AI_JOB_LEASE_SECONDS: 300
-      AI_WORKER_ID: docker-worker
+      WORKER_POLL_SECONDS: 2
+      WORKER_LEASE_SECONDS: 300
+      WORKER_ID: docker-worker
     depends_on:
       postgres:
         condition: service_healthy
