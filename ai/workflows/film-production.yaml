@@ -1,0 +1,31 @@
+version: 1
+name: film-production
+stages:
+  - id: script_analysis
+    depends_on: []
+  - id: character_generation
+    depends_on: [script_analysis]
+  - id: environment_generation
+    depends_on: [script_analysis]
+  - id: storyboard
+    depends_on: [script_analysis, character_generation, environment_generation]
+  - id: shot_generation
+    depends_on: [storyboard]
+  - id: video_generation
+    depends_on: [shot_generation]
+  - id: voice_generation
+    depends_on: [script_analysis]
+  - id: translation
+    depends_on: [script_analysis]
+  - id: dubbing
+    depends_on: [translation, voice_generation]
+  - id: music
+    depends_on: [storyboard]
+  - id: sfx
+    depends_on: [storyboard]
+  - id: editing
+    depends_on: [video_generation, dubbing, music, sfx]
+  - id: upscaling
+    depends_on: [editing]
+  - id: final_render
+    depends_on: [upscaling]
