@@ -1,0 +1,35 @@
+version: 1
+models:
+  llm:
+    provider: ollama
+    model: qwen2.5
+    capabilities: [screenplay, characters, storyboard, translation]
+  image:
+    provider: diffusers
+    model: configurable
+    capabilities: [character_reference, environment, storyboard, shot_image]
+  video:
+    provider: configurable
+    model: configurable
+    capabilities: [shot_video, interpolation, upscaling]
+  speech_to_text:
+    provider: whisper
+    model: configurable
+    capabilities: [transcription]
+  tts:
+    provider: configurable
+    model: configurable
+    capabilities: [dialogue, narration, dubbing]
+  translation:
+    provider: llm
+    model: configurable
+    capabilities: [translation, subtitle_translation]
+  lipsync:
+    provider: configurable
+    model: configurable
+    capabilities: [lip_sync]
+
+policy:
+  secrets_from_environment: true
+  production_requires_explicit_model_version: true
+  film_scoped_artifacts: true
