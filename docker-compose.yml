@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ai_film_studio
+      POSTGRES_USER: studio
+      POSTGRES_PASSWORD: studio
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/001_control_plane.sql:/docker-entrypoint-initdb.d/001_control_plane.sql:ro
+      - ./database/003_integrity_and_worker.sql:/docker-entrypoint-initdb.d/003_integrity_and_worker.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studio -d ai_film_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+    environment:
+      AI_ENGINE_HOST: 0.0.0.0
+      AI_ENGINE_PORT: 8080
+    ports:
+      - "8080:8080"
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://studio:studio@postgres:5432/ai_film_studio
+      AI_ENGINE_URL: http://ai-engine:8080
+      AI_ENGINE_TIMEOUT_SECONDS: 300
+      AI_WORKER_POLL_SECONDS: 2
+      AI_JOB_LEASE_SECONDS: 300
+      FRONTEND_CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-engine:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./backend
+    command: ["python", "-m", "app.ai_worker_main"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://studio:studio@postgres:5432/ai_film_studio
+      AI_ENGINE_URL: http://ai-engine:8080
+      AI_ENGINE_TIMEOUT_SECONDS: 300
+      AI_WORKER_POLL_SECONDS: 2
+      AI_JOB_LEASE_SECONDS: 300
+      AI_WORKER_ID: docker-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-engine:
+        condition: service_started
+
+  film-runtime:
+    build:
+      context: ./film-runtime
+    environment:
+      FILM_RUNTIME_HOST: 0.0.0.0
+      FILM_RUNTIME_PORT: 8081
+    ports:
+      - "8081:8081"
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres_data:
