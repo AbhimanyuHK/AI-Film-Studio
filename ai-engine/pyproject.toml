@@ -1,0 +1,21 @@
+[project]
+name = "ai-film-studio-ai-engine"
+version = "1.0.0"
+description = "Provider-neutral AI execution engine for AI Film Studio"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic>=2.10,<3",
+]
+
+[project.optional-dependencies]
+models = [
+  "transformers>=4.50,<5",
+  "diffusers>=0.32,<1",
+  "accelerate>=1.2,<2",
+  "torch>=2.5,<3",
+]
+
+[project.scripts]
+ai-engine = "ai_engine.worker_main:main"
