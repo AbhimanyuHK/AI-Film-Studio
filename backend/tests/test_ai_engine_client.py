@@ -1,3 +1,4 @@
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -5,8 +6,7 @@ import pytest
 from app.ai_engine_client import AIEngineClient, AIEngineError
 
 
-@pytest.mark.asyncio
-async def test_ai_engine_client_rejects_non_json_response(monkeypatch):
+def test_ai_engine_client_rejects_non_json_response(monkeypatch):
     class Response:
         status_code = 200
 
@@ -25,5 +25,9 @@ async def test_ai_engine_client_rejects_non_json_response(monkeypatch):
 
     monkeypatch.setattr("app.ai_engine_client.httpx.AsyncClient", lambda **kwargs: Client())
     client = AIEngineClient("http://test")
-    with pytest.raises(AIEngineError):
-        await client.execute_job(job_id=uuid4(), client_id=uuid4(), film_id=uuid4(), operation="video_generation", payload={}, environment_id=uuid4())
+
+    async def run():
+        with pytest.raises(AIEngineError):
+            await client.execute_job(job_id=uuid4(), client_id=uuid4(), film_id=uuid4(), operation="video_generation", payload={}, environment_id=uuid4())
+
+    asyncio.run(run())
