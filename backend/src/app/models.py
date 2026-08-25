@@ -14,7 +14,6 @@ class Base(DeclarativeBase):
 
 class ClientModel(Base):
     __tablename__ = "clients"
-
     client_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
@@ -24,7 +23,6 @@ class ClientModel(Base):
 
 class FilmModel(Base):
     __tablename__ = "films"
-
     film_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     client_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("clients.client_id"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -35,9 +33,35 @@ class FilmModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FilmEnvironmentModel(Base):
+    __tablename__ = "film_environments"
+    environment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    film_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("films.film_id"), nullable=False, unique=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False, default="aws")
+    aws_account_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    aws_region: Mapped[str] = mapped_column(String(32), nullable=False)
+    subdomain: Mapped[str] = mapped_column(String(63), nullable=False, unique=True)
+    terraform_state_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="provisioning")
+    runtime_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeploymentModel(Base):
+    __tablename__ = "deployments"
+    deployment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    environment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("film_environments.environment_id"), nullable=False)
+    version: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditEventModel(Base):
     __tablename__ = "audit_events"
-
     event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
