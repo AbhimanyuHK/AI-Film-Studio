@@ -1,0 +1,22 @@
+[project]
+name = "ai-film-studio-film-runtime"
+version = "1.0.0"
+description = "Isolated per-film runtime for AI Film Studio"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "asyncpg>=0.30,<1",
+  "httpx>=0.28,<1",
+  "boto3>=1.36,<2",
+]
+
+[project.optional-dependencies]
+vector = ["pgvector>=0.3,<1"]
+test = ["pytest>=8,<9", "pytest-asyncio>=0.25,<1", "httpx>=0.28,<1"]
+
+[project.scripts]
+film-runtime = "film_runtime.main:main"
