@@ -1,14 +1,11 @@
 name: Backend CI
 
+# CI is intentionally manual during the initial implementation phase.
+# Re-enable push/pull_request triggers only after the platform is ready for
+# continuous validation in the final automation phase.
+
 on:
-  push:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend-ci.yml"
-  pull_request:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
