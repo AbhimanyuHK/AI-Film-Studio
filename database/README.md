@@ -1,54 +1,43 @@
 # AI Film Studio Database
 
-The database layer is intentionally split into two boundaries:
+The database layer provides durable control-plane state and isolated film-environment state for the AI Film Studio platform.
 
 ```text
-                    AI Film Studio
-                         │
-              ┌──────────┴──────────┐
-              │                     │
-              ▼                     ▼
-      Control-plane DB       Film Environment DB
-         PostgreSQL              PostgreSQL
-              │                     │
-      clients / films       scenes / shots / assets
-      jobs / audit          characters / film state
-              │                     │
-              └──────────┬──────────┘
-                         │
-                    AI Engine
-                         │
-                         ▼
-                Film-scoped object storage
+                         AI Film Studio
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+                 ▼                         ▼
+          Control-plane DB         Film Environment DB
+             PostgreSQL                PostgreSQL
+                 │                         │
+        clients / films / jobs     scenes / shots / assets
+        audit / worker leases      film production state
+                 │                         │
+                 └────────────┬────────────┘
+                              │
+                           AI Engine
+                              │
+                              ▼
+                    Film-scoped S3 storage
 ```
 
-## 1. Control-plane database
+## Database boundaries
 
-`001_control_plane.sql` defines durable platform state used by the backend:
+### Control plane
+
+`001_control_plane.sql` defines durable platform state:
 
 - `clients`
 - `films`
 - `jobs`
 - `audit_events`
 
-This database contains control-plane metadata only. It does not become the shared store for film content.
+The control plane stores identifiers, operational state, authorization scope, job metadata and audit information. It is not a shared repository for film content.
 
-### Job lifecycle
+### Film environment
 
-```text
-queued → running → completed
-             │
-             ├→ retrying → running
-             └→ failed
-```
-
-Jobs are designed for transactional worker claiming with PostgreSQL row locks and `SKIP LOCKED`.
-
-## 2. Film database
-
-`002_film_database_template.sql` is the schema template for an isolated film environment. Provision a separate database or equivalent PostgreSQL isolation boundary for each film environment.
-
-It contains:
+`002_film_database_template.sql` defines the schema template for an isolated film environment:
 
 - `film_metadata`
 - `characters`
@@ -57,69 +46,149 @@ It contains:
 - `production_jobs`
 - `film_assets`
 
-The central control plane stores references and operational state; film-specific production state belongs to the film boundary.
+A production deployment can provision this schema in a separate PostgreSQL database or an equivalent isolated PostgreSQL boundary for each film environment.
 
-## 3. Storage boundary
+## Job queue hardening
 
-Large binary assets should not be stored in PostgreSQL.
+`003_integrity_and_worker.sql` adds production queue protections:
 
-```text
-Film DB
-   │
-   └── asset metadata + object key
-                    │
-                    ▼
-             Film-scoped S3
-                    │
-        ┌───────────┼───────────┐
-        ▼           ▼           ▼
-      images      video        audio
+- worker ownership
+- worker lease expiration
+- retry counters
+- idempotency keys
+- claimable-job indexes
+- worker-lease indexes
+- status constraints
+- client/film status constraints
+- automatic `updated_at` triggers
+
+The worker claim pattern is transactional:
+
+```sql
+SELECT ...
+FROM jobs
+WHERE status IN ('queued', 'retrying')
+  AND scheduled_at <= now()
+  AND (lease_until IS NULL OR lease_until < now())
+ORDER BY scheduled_at
+FOR UPDATE SKIP LOCKED;
 ```
 
-Recommended key pattern:
+The selected row is then marked `running` with a worker ID and lease in the same transaction.
+
+## Job lifecycle
+
+```text
+QUEUED
+  │
+  ▼
+RUNNING ───────────────► COMPLETED
+  │
+  ├── transient error ─► RETRYING ──► RUNNING
+  │
+  └── terminal error ──► FAILED
+
+RUNNING ── cancellation ──► CANCELLED
+```
+
+The database is the durable source of job state, so an API or worker restart does not lose the production queue.
+
+## Idempotency
+
+AI jobs may be retried because GPU workers, provider services or network calls can fail. The control plane therefore supports an optional `idempotency_key` scoped to a film.
+
+Repeated submission of the same logical job can be detected without creating duplicate work.
+
+## Storage boundary
+
+Large media files must not be stored in PostgreSQL.
+
+```text
+Film database
+     │
+     └── asset metadata + object key
+                    │
+                    ▼
+            Film-scoped S3
+                    │
+          ┌─────────┼─────────┐
+          ▼         ▼         ▼
+        images     video     audio
+```
+
+Recommended object-key structure:
 
 ```text
 clients/{client_id}/films/{film_id}/environments/{environment_id}/assets/{asset_id}/...
 ```
 
-Access to an object must be derived from the authenticated client/film/environment scope.
+The application must derive and validate this scope from the authenticated principal rather than trusting arbitrary client/film IDs supplied by the browser.
 
-## 4. Backend integration
+## Backend integration
 
-The backend SQLAlchemy models map to the control-plane schema. The reserved SQLAlchemy declarative attribute `metadata` is represented in Python as `metadata_json` while retaining the PostgreSQL column name `metadata`.
+The backend uses SQLAlchemy against PostgreSQL. The SQLAlchemy Declarative API reserves the Python attribute name `metadata`; therefore application models use `metadata_json` where necessary while PostgreSQL can retain the column name `metadata`.
 
-## 5. Initialization
+The backend currently uses async SQLAlchemy/`asyncpg`. fileciteturn212file0L2-L2
 
-For a new control-plane PostgreSQL instance:
+## Initialization
+
+Development control-plane database:
 
 ```bash
 psql "$DATABASE_URL" -f database/001_control_plane.sql
+psql "$DATABASE_URL" -f database/003_integrity_and_worker.sql
 ```
 
-For a new isolated film database:
+Development film environment:
 
 ```bash
 psql "$FILM_DATABASE_URL" -f database/002_film_database_template.sql
 ```
 
-Production deployments should execute these definitions through the project's migration system rather than relying on ad-hoc manual SQL execution.
+Production environments should run these definitions through a versioned migration mechanism rather than applying arbitrary SQL manually.
 
-## 6. Technology stack
+## Technology stack
 
 - PostgreSQL
-- SQLAlchemy
-- Alembic-compatible migration workflow
-- JSONB for flexible metadata/results
-- UUID identifiers
-- PostgreSQL row locking for worker coordination
+- SQLAlchemy 2.x
+- asyncpg
+- Alembic-compatible migrations
+- JSONB
+- UUID / `pgcrypto`
+- PostgreSQL row-level locking
+- `FOR UPDATE SKIP LOCKED`
+- Transactional worker leases
 - S3/object storage for generated media
 
-## 7. Data isolation rules
+## Data isolation rules
 
-1. Never store content from multiple films in a shared film database.
-2. Every control-plane film belongs to exactly one client.
-3. Every AI job carries its film/environment scope.
-4. Film assets are referenced by scoped object keys.
-5. Generated media is stored outside PostgreSQL.
+1. Every film belongs to exactly one client.
+2. Every AI job carries client/film/environment scope.
+3. Film production state belongs to the film environment.
+4. Generated media remains outside PostgreSQL.
+5. Object keys are film/environment scoped.
 6. Cross-client and cross-film access is rejected at the application authorization boundary.
-7. Audit events remain in the central control plane for operational governance.
+7. Audit events remain in the central control plane.
+8. Worker claims must be transactional.
+9. Retried jobs must be idempotency-aware.
+10. Stale worker leases must be recoverable.
+
+## Database readiness
+
+The database layer now provides the schema foundation required by the complete platform flow:
+
+```text
+Frontend
+   ↓
+FastAPI Backend
+   ↓
+PostgreSQL
+   ↓
+Persistent AI Job Worker
+   ↓
+AI Engine
+   ↓
+GPU / Models
+   ↓
+S3 Film Artifacts
+```
