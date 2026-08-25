@@ -7,25 +7,43 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class ImageArtifact:
+class ArtifactRef:
+    client_id: str
     film_id: str
-    shot_id: str
+    artifact_id: str
+    kind: str
     path: str
     sha256: str
-    content_type: str = "image/png"
 
 
 class LocalArtifactStore:
-    """Development artifact store with the same film-scoped key contract used by S3."""
+    """Development store with mandatory client/film-scoped artifact paths."""
 
     def __init__(self, root: str = "artifacts") -> None:
-        self.root = Path(root)
+        self.root = Path(root).resolve()
 
-    def save_image(self, film_id: str, shot_id: str, image: Any) -> ImageArtifact:
-        if not film_id or not shot_id:
-            raise ValueError("film_id and shot_id are required")
-        target = self.root / film_id / "shots" / f"{shot_id}.png"
+    def _target(self, client_id: str, film_id: str, artifact_id: str, kind: str) -> Path:
+        if not client_id or not film_id or not artifact_id or not kind:
+            raise ValueError("client_id, film_id, artifact_id and kind are required")
+        return self.root / "clients" / client_id / "films" / film_id / kind / artifact_id
+
+    def save_bytes(self, client_id: str, film_id: str, artifact_id: str, kind: str, data: bytes) -> ArtifactRef:
+        if not isinstance(data, bytes):
+            raise TypeError("data must be bytes")
+        target = self._target(client_id, film_id, artifact_id, kind)
         target.parent.mkdir(parents=True, exist_ok=True)
-        image.save(target, format="PNG")
-        digest = hashlib.sha256(target.read_bytes()).hexdigest()
-        return ImageArtifact(film_id=film_id, shot_id=shot_id, path=str(target), sha256=digest)
+        target.write_bytes(data)
+        digest = hashlib.sha256(data).hexdigest()
+        return ArtifactRef(client_id, film_id, artifact_id, kind, str(target), digest)
+
+    def save_image(self, client_id: str, film_id: str, shot_id: str, image: Any) -> ArtifactRef:
+        from io import BytesIO
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        return self.save_bytes(client_id, film_id, shot_id, "shots", buffer.getvalue())
+
+    def get_bytes(self, client_id: str, film_id: str, artifact_id: str, kind: str) -> bytes:
+        target = self._target(client_id, film_id, artifact_id, kind)
+        if not target.is_file():
+            raise FileNotFoundError("artifact not found in requested film scope")
+        return target.read_bytes()
