@@ -1,0 +1,9 @@
+[project]
+name = "ai-film-studio-deployment"
+version = "0.1.0"
+description = "Film environment deployment orchestrator"
+requires-python = ">=3.12"
+dependencies = ["boto3>=1.35,<2"]
+
+[project.scripts]
+film-deploy = "deployment.cli:main"
