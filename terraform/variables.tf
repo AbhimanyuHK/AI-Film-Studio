@@ -47,3 +47,27 @@ variable "availability_zone" {
   type        = string
   default     = "us-east-1a"
 }
+
+variable "db_instance_class" {
+  description = "RDS instance class for the film control database"
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_allocated_storage" {
+  description = "Initial RDS storage in GiB"
+  type        = number
+  default     = 20
+}
+
+variable "db_username" {
+  description = "Master username managed by RDS Secrets Manager integration"
+  type        = string
+  default     = "filmstudio"
+}
+
+variable "db_deletion_protection" {
+  description = "Prevent accidental database deletion in production"
+  type        = bool
+  default     = true
+}
