@@ -12,11 +12,19 @@ class ImagePipeline(Protocol):
 
 
 @dataclass(frozen=True)
+class ImageReference:
+    reference_id: str
+    character_name: str
+    image: Any
+
+
+@dataclass(frozen=True)
 class ImageGenerationRequest:
     film_id: str
     shot_id: str
     model: str
     prompt: str
+    references: tuple[ImageReference, ...] = ()
     width: int = 1024
     height: int = 1024
     steps: int = 30
@@ -32,12 +40,21 @@ class ImageGenerationResult:
     output: Any
 
 
-def build_image_request(film_id: str, shot: Shot, model: str = "FLUX.1-dev", **kwargs: Any) -> ImageGenerationRequest:
+def build_image_request(
+    film_id: str,
+    shot: Shot,
+    model: str = "FLUX.1-dev",
+    references: tuple[ImageReference, ...] = (),
+    **kwargs: Any,
+) -> ImageGenerationRequest:
+    if any(not ref.reference_id for ref in references):
+        raise ValueError("every image reference must have a reference_id")
     return ImageGenerationRequest(
         film_id=film_id,
         shot_id=shot.shot_id,
         model=model,
         prompt=build_shot_prompt(shot),
+        references=references,
         **kwargs,
     )
 
@@ -60,6 +77,9 @@ class ImageGenerator:
             "height": request.height,
             "num_inference_steps": request.steps,
             "guidance_scale": request.guidance_scale,
+            "film_id": request.film_id,
+            "shot_id": request.shot_id,
+            "references": request.references,
         }
         if request.seed is not None:
             kwargs["seed"] = request.seed
