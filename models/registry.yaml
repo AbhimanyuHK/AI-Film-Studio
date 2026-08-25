@@ -1,0 +1,36 @@
+version: 1
+policy:
+  require_pinned_versions: true
+  allow_unverified_models: false
+  film_lora_scope: private
+models:
+  llm:
+    provider: configurable
+    model: configurable
+  image:
+    provider: configurable
+    model: configurable
+  video:
+    provider: configurable
+    model: configurable
+  speech_to_text:
+    provider: configurable
+    model: configurable
+  tts:
+    provider: configurable
+    model: configurable
+  translation:
+    provider: configurable
+    model: configurable
+  lipsync:
+    provider: configurable
+    model: configurable
+metadata_required:
+  - name
+  - version
+  - license
+  - commercial_use
+  - redistribution
+  - attribution
+  - fine_tuning_restrictions
+  - deployment_compatibility
