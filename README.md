@@ -3434,3 +3434,690 @@ If we're actually going to build this rather than just discuss it:
 5. **Automated QA + cost/provenance tracking**
 
 Those five are what turn a collection of AI models into an actual **AI Film Studio**.
+
+Yes. With your clarified requirement, I would **change the architecture** from a conventional multi-tenant SaaS to a **dedicated deployment per film** model.
+
+And I would use **AWS as the primary cloud** if the requirement is that each film gets a completely separate cloud account/environment.
+
+## 1. The model we should build
+
+A **deployment = one film production environment**.
+
+Not:
+
+```text
+❌ One deployment
+   ├── Film A
+   ├── Film B
+   └── Film C
+```
+
+Instead:
+
+```text
+✅ AI Film Studio Platform
+       │
+       ├── Deployment 001
+       │      └── Film A / Client 1
+       │
+       ├── Deployment 002
+       │      └── Film B / Client 2
+       │
+       └── Deployment 003
+              └── Film C / Client 3
+```
+
+Each deployment is independently provisioned.
+
+---
+
+# 2. Each film gets its own AWS account
+
+For your strongest isolation model:
+
+```text
+                         AI FILM STUDIO
+                         CONTROL PLANE
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+          AWS Account 1    AWS Account 2    AWS Account 3
+              │                │                │
+           Film A            Film B            Film C
+          Client 1           Client 2           Client 3
+              │                │                │
+        film-a.domain     film-b.domain     film-c.domain
+```
+
+So:
+
+```text
+Film A → AWS Account 1
+Film B → AWS Account 2
+Film C → AWS Account 3
+```
+
+This is much stronger than simply doing:
+
+```text
+s3://studio/film-a/
+s3://studio/film-b/
+```
+
+inside one account.
+
+---
+
+# 3. Inside each AWS account
+
+Each film gets its own complete production stack:
+
+```text
+AWS Account: FILM-A
+│
+├── VPC
+│
+├── Public/Private Subnets
+│
+├── ECS/EKS/EC2
+│
+├── GPU Workers
+│
+├── S3
+│
+├── RDS PostgreSQL
+│
+├── Vector/RAG storage
+│
+├── SQS
+│
+├── EventBridge
+│
+├── Secrets Manager
+│
+├── KMS
+│
+├── CloudWatch
+│
+├── ECR
+│
+└── AI Film Studio
+```
+
+Film B has a completely independent copy:
+
+```text
+AWS Account: FILM-B
+│
+├── VPC
+├── GPU Workers
+├── S3
+├── RDS
+├── Vector/RAG
+├── SQS
+├── Secrets
+├── KMS
+├── Monitoring
+└── AI Film Studio
+```
+
+---
+
+# 4. No film data crosses accounts
+
+This becomes an architectural rule:
+
+```text
+FILM A ACCOUNT
+       │
+       │
+       X  ❌
+       │
+       │
+FILM B ACCOUNT
+```
+
+Not even:
+
+* scripts
+* prompts
+* character information
+* LoRAs
+* embeddings
+* voice profiles
+* generated images
+* generated video
+* audio
+* metadata
+* logs
+* temporary files
+* film knowledge graph
+* RAG context
+
+should automatically move between them.
+
+---
+
+# 5. The AI itself is also isolated
+
+This is critical.
+
+Suppose Film A asks:
+
+> "Who is the main antagonist?"
+
+The AI should only have access to:
+
+```text
+Film A
+├── Script
+├── Characters
+├── Scenes
+├── Locations
+└── Film A knowledge base
+```
+
+It cannot query a central database containing Film B.
+
+The architecture becomes:
+
+```text
+Film A Request
+      ↓
+Film A API
+      ↓
+Film A Orchestrator
+      ↓
+Film A Knowledge Store
+      ↓
+Film A GPU Worker
+      ↓
+Film A Output
+```
+
+Film B has its own pipeline.
+
+---
+
+# 6. Subdomains
+
+Exactly as you proposed:
+
+```text
+film-a.yourstudio.com
+film-b.yourstudio.com
+film-c.yourstudio.com
+```
+
+Each DNS record points to the corresponding AWS environment.
+
+```text
+film-a.yourstudio.com
+        ↓
+AWS Account 1
+        ↓
+Film A Application
+```
+
+```text
+film-b.yourstudio.com
+        ↓
+AWS Account 2
+        ↓
+Film B Application
+```
+
+---
+
+# 7. How you actually use the studio
+
+You don't deploy the application every time you want to generate a shot.
+
+Instead, the workflow is:
+
+### Step 1 — Create Film
+
+From your **Studio Control Plane**:
+
+```text
+Create New Film
+```
+
+Enter:
+
+```text
+Film Name: The Centerline
+Client: Client 1
+Source Language: Kannada
+Target Languages: 12
+Expected Duration: 3 hours
+```
+
+---
+
+### Step 2 — Provision environment
+
+Your deployment system creates:
+
+```text
+AWS Account
+      ↓
+Networking
+      ↓
+Storage
+      ↓
+Database
+      ↓
+GPU infrastructure
+      ↓
+AI models
+      ↓
+Film Studio application
+      ↓
+DNS
+```
+
+Result:
+
+```text
+https://centerline.yourstudio.com
+```
+
+---
+
+# 8. Client manages their film
+
+Client 1 logs into:
+
+```text
+centerline.yourstudio.com
+```
+
+They see:
+
+```text
+┌──────────────────────────────────────────┐
+│ THE CENTERLINE                           │
+│                                          │
+│ Production Dashboard                     │
+│                                          │
+│ Script              ✅                   │
+│ Characters          ✅                   │
+│ Locations           ✅                   │
+│ Storyboard          86%                  │
+│ Video                63%                 │
+│ Audio                51%                 │
+│ Localization         37%                 │
+│ QA                    42%                 │
+│                                          │
+│ GPU Jobs              24                 │
+│ Estimated Cost        $XX,XXX             │
+└──────────────────────────────────────────┘
+```
+
+They manage **only their film**.
+
+---
+
+# 9. Film production pipeline
+
+Inside that isolated environment:
+
+```text
+SCRIPT
+  ↓
+STORY ANALYSIS
+  ↓
+CHARACTER BIBLE
+  ↓
+WORLD BIBLE
+  ↓
+CINEMATOGRAPHY BIBLE
+  ↓
+SCENE BREAKDOWN
+  ↓
+SHOT GENERATION
+  ↓
+VIDEO GENERATION
+  ↓
+VIDEO QA
+  ↓
+AUDIO
+  ↓
+12-LANGUAGE LOCALIZATION
+  ↓
+LIP SYNC
+  ↓
+AUDIO MIX
+  ↓
+FINAL QA
+  ↓
+MASTER
+```
+
+---
+
+# 10. What is shared?
+
+Very little.
+
+The **software blueprint** is shared:
+
+```text
+AI Film Studio Code
+Terraform modules
+Docker images
+Base model definitions
+CI/CD
+Deployment automation
+```
+
+But the **film data is not shared**.
+
+Think:
+
+```text
+                     STUDIO CODE
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+          ▼              ▼              ▼
+       FILM A          FILM B          FILM C
+       ACCOUNT         ACCOUNT         ACCOUNT
+          │              │              │
+       Private         Private        Private
+       Data            Data           Data
+```
+
+---
+
+# 11. What about the base AI models?
+
+This is the one area where sharing is acceptable.
+
+For example, all environments could use the same approved base model:
+
+```text
+Video Model X
+Image Model Y
+TTS Model Z
+LLM Model Q
+```
+
+But the **film-specific modifications** remain inside the film account.
+
+For example:
+
+```text
+BASE MODEL
+   │
+   ├── Film A LoRA → Account A
+   │
+   ├── Film B LoRA → Account B
+   │
+   └── Film C LoRA → Account C
+```
+
+The base model isn't film information.
+
+The LoRA may be.
+
+Therefore:
+
+> **Base model can be shared. Film-specific fine-tuning cannot.**
+
+---
+
+# 12. GPU architecture
+
+For maximum confidentiality:
+
+```text
+Film A AWS Account
+       │
+       ▼
+Dedicated GPU Workers
+       │
+       ▼
+Generate Film A
+       │
+       ▼
+Upload to Film A S3
+       │
+       ▼
+Worker destroyed/cleaned
+```
+
+Film B has its own workers.
+
+We should avoid a worker processing Film A and then Film B without an explicit secure lifecycle.
+
+For highly sensitive projects, use **ephemeral GPU workers**.
+
+---
+
+# 13. AWS services I'd use
+
+The AWS implementation would look roughly like this:
+
+| Requirement         | AWS               |
+| ------------------- | ----------------- |
+| Account isolation   | AWS Organizations |
+| Networking          | VPC               |
+| GPU compute         | EC2 GPU instances |
+| Containers          | ECR + ECS/EKS     |
+| Object storage      | S3                |
+| Database            | RDS PostgreSQL    |
+| Queue               | SQS               |
+| Event orchestration | EventBridge       |
+| Secrets             | Secrets Manager   |
+| Encryption          | KMS               |
+| DNS                 | Route 53          |
+| Load balancing      | ALB               |
+| Monitoring          | CloudWatch        |
+| Audit               | CloudTrail        |
+| IAM                 | IAM               |
+| Infrastructure      | Terraform         |
+| CI/CD               | GitHub Actions    |
+| Container registry  | ECR               |
+
+For GPU-heavy inference, I'd keep the **actual model execution on GPU EC2/EKS workers**, rather than forcing everything into serverless services.
+
+---
+
+# 14. AWS Organizations becomes the control layer
+
+Your company can have a management/root organization:
+
+```text
+AWS Organization
+│
+├── Studio Management
+│
+├── Film Account A
+│   └── Client 1 / Film A
+│
+├── Film Account B
+│   └── Client 2 / Film B
+│
+└── Film Account C
+    └── Client 3 / Film C
+```
+
+You can apply organization-level guardrails without accessing film content.
+
+For example:
+
+* prohibit public S3 buckets
+* require encryption
+* restrict regions
+* enforce CloudTrail
+* enforce IAM policies
+* prevent unauthorized networking
+* enforce security standards
+
+---
+
+# 15. Even better: client-owned AWS account
+
+For your biggest clients, I'd support this:
+
+```text
+CLIENT 1 AWS ORGANIZATION
+          │
+          └── FILM A ACCOUNT
+                 │
+                 └── Your Studio deployed here
+```
+
+The client owns:
+
+* AWS account
+* billing
+* KMS
+* data
+* IAM
+* retention
+
+You operate the application with delegated permissions.
+
+This is extremely attractive for enterprise customers who don't want their confidential movie assets sitting in the vendor's cloud account.
+
+---
+
+# 16. Terraform architecture
+
+Your Terraform repository should therefore be designed around:
+
+```text
+ai-film-studio/
+│
+├── application/
+│
+├── models/
+│
+├── terraform/
+│   │
+│   ├── modules/
+│   │   ├── aws-account/
+│   │   ├── vpc/
+│   │   ├── gpu/
+│   │   ├── storage/
+│   │   ├── database/
+│   │   ├── queues/
+│   │   ├── security/
+│   │   ├── monitoring/
+│   │   └── application/
+│   │
+│   └── deployments/
+│       ├── film-a/
+│       ├── film-b/
+│       └── film-c/
+│
+└── .github/
+    └── workflows/
+```
+
+But don't hardcode Film A/B/C into the platform.
+
+Instead:
+
+```text
+deployment configuration
+        ↓
+Terraform
+        ↓
+new AWS account/environment
+        ↓
+new film
+```
+
+---
+
+# 17. Deployment lifecycle
+
+A film environment should have a lifecycle:
+
+```text
+CREATE
+  ↓
+ACTIVE
+  ↓
+PRODUCTION
+  ↓
+COMPLETE
+  ↓
+ARCHIVED
+  ↓
+DESTROY / RETAIN
+```
+
+For example, after Film A is released:
+
+```text
+GPU workers → stopped
+Application → scaled down
+Assets → archived
+Database → retained/archived
+Logs → retained
+Secrets → rotated
+```
+
+The client can keep the environment for whatever contractual retention period you define.
+
+---
+
+# 18. Security boundary
+
+The final architecture is therefore:
+
+```text
+                       STUDIO CONTROL PLANE
+                              │
+                     Deployment Manager
+                              │
+             ┌────────────────┼────────────────┐
+             │                │                │
+             ▼                ▼                ▼
+        AWS ACCOUNT A    AWS ACCOUNT B    AWS ACCOUNT C
+             │                │                │
+          FILM A             FILM B           FILM C
+          CLIENT 1           CLIENT 2         CLIENT 3
+             │                │                │
+          Private            Private          Private
+          VPC                VPC              VPC
+             │                │                │
+          Private            Private          Private
+          Storage            Storage          Storage
+             │                │                │
+          Private            Private          Private
+          Database           Database         Database
+             │                │                │
+          Dedicated          Dedicated        Dedicated
+          GPU                GPU              GPU
+
+             ❌ NO FILM DATA CROSSING ❌
+```
+
+## My recommendation
+
+For the requirements you've now specified, I would **stop thinking of this as a multi-tenant SaaS**.
+
+Build it as:
+
+> **AI Film Studio = a control/deployment platform that provisions a completely isolated production environment for every film.**
+
+And use:
+
+**AWS Organizations + separate AWS account per film + separate VPC + separate storage + separate database + separate GPU workers + separate secrets/KMS + separate subdomain.**
+
+Terraform creates the environment.
+
+The client uses the environment.
+
+Your studio team manages the platform.
+
+**Film A never needs to know Film B exists.**
+
+That is the architecture I would lock in before we start designing the repository, Terraform structure, AWS services, and application code.
