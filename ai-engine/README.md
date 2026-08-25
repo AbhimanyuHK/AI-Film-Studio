@@ -4,27 +4,22 @@ Provider-neutral AI execution layer for AI Film Studio.
 
 The control plane owns film isolation, jobs, assets and audit. This package owns model execution. Workers receive a film-scoped job payload and write generated artifacts to the corresponding film-scoped storage boundary.
 
-## Current pre-production pipeline
+## Current pipeline
 
 ```text
 Screenplay
-   |
-   v
-Qwen structured analysis
-   |
-   +--> Characters
-   +--> Locations
-   +--> Scenes
-   |
-   v
-Production Bible Builder
-   |
-   +--> Character Bible --> stable visual prompt
-   |
-   +--> Environment Bible --> stable visual prompt
+   -> Qwen structured analysis
+   -> Character + Environment Bible
+   -> Storyboard / Shot Plan
+   -> Stable Shot Prompt
+   -> Image Generation
+   -> Image Validation
+   -> Video Generation
+   -> Audio / Dubbing
+   -> Editing / Final Render
 ```
 
-The character/environment bibles are reusable sources of truth for downstream image and video generation. This is the foundation for visual continuity across shots.
+The character/environment bibles are reusable sources of truth for downstream generation. Shot prompts carry those continuity anchors into image/video generation.
 
 ## Architecture
 
@@ -60,10 +55,11 @@ Heavy ML dependencies are loaded only by GPU workers. The API/control-plane proc
 ## Production stages
 
 - `script_analysis`: screenplay structure, scenes, characters, locations and shot requirements
-- `character_generation`: reference/character assets and character identity references
+- `character_generation`: reference/character assets and identity references
 - `environment_generation`: location and set references
 - `storyboard`: shot-by-shot visual plan
 - `shot_generation`: normalized shot prompts/specifications
+- `image_generation`: cinematic reference/keyframe generation
 - `video_generation`: image-to-video/text-to-video generation
 - `voice_generation`: character voice tracks
 - `transcription`: source dialogue/audio transcription
@@ -77,7 +73,7 @@ Heavy ML dependencies are loaded only by GPU workers. The API/control-plane proc
 
 ## Model strategy
 
-Models are configuration-driven rather than embedded in the orchestration layer. A deployment can select a model per stage without changing the DAG or SaaS control plane.
+Models are configuration-driven rather than embedded in orchestration. A deployment can select a model per stage without changing the SaaS control plane.
 
 Current configured candidates include:
 
@@ -91,13 +87,29 @@ Current configured candidates include:
 
 These are integration targets. Each model must use its supported pipeline and license before deployment.
 
-## Implemented pre-production AI
+## Implemented AI
 
-`script_analysis.py` converts screenplay text into a typed `ScreenplayAnalysis` containing title, logline, characters, locations and scenes. `qwen_backend.py` provides the structured-Qwen adapter boundary.
+### 1. Structured screenplay analysis
 
-`character_bible.py` creates reusable production bibles. Character bibles contain identity, age range, appearance, wardrobe, personality and a stable visual anchor. Environment bibles contain architecture, lighting, palette and continuity anchors.
+`script_analysis.py` converts screenplay text into typed `ScreenplayAnalysis` containing title, logline, characters, locations and scenes. `qwen_backend.py` provides the structured-Qwen adapter boundary.
 
-`visual_prompts.py` converts these bibles into stable downstream visual prompts so later shots do not freely reinterpret the same character or set.
+### 2. Production bibles
+
+`character_bible.py` creates reusable character and environment bibles. Character bibles contain identity, age range, appearance, wardrobe, personality and a stable visual anchor. Environment bibles contain architecture, lighting, palette and continuity anchors.
+
+### 3. Storyboard / shot planning
+
+`storyboard.py` creates typed shots from scenes and production bibles. Each shot carries camera, lens, movement, lighting, action, dialogue, characters, location and continuity anchors.
+
+`shot_prompts.py` converts a shot into a normalized prompt for downstream generation.
+
+### 4. Film-scoped image generation contract
+
+`image_generation.py` defines the image generation request/result contract and executes an already-loaded image pipeline. Requests require `film_id` and `shot_id`, keeping generated work traceable to the owning film. Model loading remains in `ModelManager`.
+
+### 5. Image validation
+
+`image_validation.py` validates generated dimensions before an artifact is promoted to the next stage.
 
 ## Worker configuration
 
@@ -144,17 +156,8 @@ job arrives
 AI Film Studio is multi-tenant, but **film data must never cross film boundaries**.
 
 ```text
-Film A
-  -> Film A job IDs
-  -> Film A GPU context
-  -> Film A S3 prefix/bucket
-  -> Film A metadata
-
-Film B
-  -> Film B job IDs
-  -> Film B GPU context
-  -> Film B S3 prefix/bucket
-  -> Film B metadata
+Film A -> Film A jobs -> Film A GPU context -> Film A storage
+Film B -> Film B jobs -> Film B GPU context -> Film B storage
 ```
 
 For high-security client deployments, a separate cloud account/project, storage boundary and GPU worker pool can be provisioned for each film. Shared infrastructure is only acceptable when strict tenant isolation controls are enforced.
@@ -196,13 +199,18 @@ Localization originates from a versioned master script. Translations and dubbed 
 - Character production bible generation
 - Environment production bible generation
 - Stable visual prompt generation
+- Storyboard and shot planning
+- Normalized shot prompt generation
+- Film-scoped image generation contract
+- Image output dimension validation
 
 ### Still to integrate
 
 - Live Qwen/vLLM production client
-- FLUX production image pipeline and character consistency/LoRA
+- Real FLUX/Diffusers pipeline loading and generation
+- Character reference conditioning and LoRA identity consistency
 - HunyuanVideo production video pipeline
-- Shot/storyboard generation from scene analysis
+- Shot continuity/quality scoring
 - Whisper transcription worker
 - Translation worker
 - multilingual TTS/voice pipeline
@@ -213,4 +221,4 @@ Localization originates from a versioned master script. Translations and dubbed 
 - 4K/8K enhancement
 - final render and delivery
 
-The current code intentionally separates these integrations from the control plane so models can be upgraded independently.
+The code deliberately keeps provider-specific model loading separate from the control plane so models can be upgraded independently.
