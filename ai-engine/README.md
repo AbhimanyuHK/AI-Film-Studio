@@ -1,56 +1,65 @@
 # AI Film Engine
 
-Provider-neutral AI execution layer for AI Film Studio.
+Provider-neutral AI execution layer for AI Film Studio. The existing engine architecture remains unchanged: model execution is film-scoped, jobs carry client/film identity, and generated artifacts remain inside the owning film storage boundary.
 
-The control plane owns film isolation, jobs, assets and audit. This package owns model execution. Workers receive a film-scoped job payload and write generated artifacts to the corresponding film-scoped storage boundary.
-
-## Current pipeline
+## Complete AI execution flow
 
 ```text
 Screenplay
-   -> Qwen structured analysis
-   -> Character + Environment Bible
-   -> Storyboard / Shot Plan
-   -> Stable Shot Prompt
-   -> Image Generation
-   -> Image Validation
-   -> Video Generation
-   -> Audio / Dubbing
-   -> Editing / Final Render
+   -> structured analysis
+   -> character/environment bibles
+   -> storyboard / shot plan
+   -> stable shot prompts
+   -> image generation
+   -> image validation
+   -> video generation
+   -> audio / dubbing
+   -> lip-sync / subtitles
+   -> editing / final render
 ```
 
-The character/environment bibles are reusable sources of truth for downstream generation. Shot prompts carry those continuity anchors into image/video generation.
+The runtime now connects the existing job contract, authorization, retry/state machine and AI pipeline through `AIService`/`FilmAIPipeline`. Provider instances are created lazily by `ProviderRegistry`, so GPU/model dependencies remain worker-only.
 
-## Architecture
+## Existing architecture
 
 ```text
 Production Job
       |
       v
-GPU Job Scheduler
+AIJob validation + film authorization
       |
       v
-Film-scoped GPU Worker
+FilmAIPipeline
       |
       v
-Model Runtime / Model Manager
+AIJobExecutor
       |
-      +-------------------+-------------------+
-      |                   |                   |
-     vLLM             Diffusers          Audio Runtime
-      |                   |                   |
-  LLM/VLM             Image/Video        ASR/TTS/Music
-      |                   |                   |
-      +-------------------+-------------------+
-                          |
-                          v
-                    Artifact Metadata
-                          |
-                          v
-                    Film-scoped S3
+      +--> script analysis
+      +--> image generation
+      +--> video generation
+      +--> audio generation
+      +--> lip sync
+      +--> film assembly
+      |
+      v
+Film-scoped artifacts
 ```
 
-Heavy ML dependencies are loaded only by GPU workers. The API/control-plane process must not load CUDA models during startup or test collection.
+## Provider runtime
+
+`provider_runtime.py` provides a lightweight lazy registry. Applications register a stage with a `ProviderConfig` and factory. The factory is not invoked until that stage is requested. This keeps heavy ML imports and CUDA model loading out of API startup and test collection.
+
+Provider configuration is deployment-specific. Credentials are read from environment variables and are never stored in source code.
+
+Example configuration concept:
+
+```text
+stage: image_generation
+provider: diffusers
+model: FLUX.1-dev
+endpoint: optional worker endpoint
+api_key_env: optional secret variable
+```
 
 ## Production stages
 
@@ -73,152 +82,78 @@ Heavy ML dependencies are loaded only by GPU workers. The API/control-plane proc
 
 ## Model strategy
 
-Models are configuration-driven rather than embedded in orchestration. A deployment can select a model per stage without changing the SaaS control plane.
+Models remain configuration-driven rather than embedded in orchestration. Current integration targets include Qwen2.5-VL for screenplay/storyboard reasoning, FLUX.1-dev for image generation, HunyuanVideo for video generation and Whisper-large-v3 for transcription. Each deployment must validate model licensing, hardware requirements and provider availability before production use.
 
-Current configured candidates include:
+## Film isolation
 
-| Stage | Model | Runtime | VRAM target |
-|---|---|---|---:|
-| Script analysis / storyboard | Qwen2.5-VL-72B | vLLM/Hugging Face | 80 GB+ |
-| Character generation | FLUX.1-dev | Diffusers | 24 GB+ |
-| Environment generation | FLUX.1-dev | Diffusers | 24 GB+ |
-| Video generation | HunyuanVideo | Diffusers | 80 GB+ |
-| Transcription | Whisper-large-v3 | Hugging Face | 8 GB+ |
-
-These are integration targets. Each model must use its supported pipeline and license before deployment.
-
-## Implemented AI
-
-### 1. Structured screenplay analysis
-
-`script_analysis.py` converts screenplay text into typed `ScreenplayAnalysis` containing title, logline, characters, locations and scenes. `qwen_backend.py` provides the structured-Qwen adapter boundary.
-
-### 2. Production bibles
-
-`character_bible.py` creates reusable character and environment bibles. Character bibles contain identity, age range, appearance, wardrobe, personality and a stable visual anchor. Environment bibles contain architecture, lighting, palette and continuity anchors.
-
-### 3. Storyboard / shot planning
-
-`storyboard.py` creates typed shots from scenes and production bibles. Each shot carries camera, lens, movement, lighting, action, dialogue, characters, location and continuity anchors.
-
-`shot_prompts.py` converts a shot into a normalized prompt for downstream generation.
-
-### 4. Film-scoped image generation contract
-
-`image_generation.py` defines the image generation request/result contract and executes an already-loaded image pipeline. Requests require `film_id` and `shot_id`, keeping generated work traceable to the owning film. Model loading remains in `ModelManager`.
-
-### 5. Image validation
-
-`image_validation.py` validates generated dimensions before an artifact is promoted to the next stage.
-
-## Worker configuration
+Every AI job carries:
 
 ```text
-GPU_WORKER_ID
-GPU_DEVICE
-GPU_WORKER_CONCURRENCY
-FILM_ASSET_BUCKET
-```
-
-Workers are film/job scoped. A worker must never resolve an asset by a global filename or accept storage credentials belonging to another film deployment.
-
-## Artifact contract
-
-Every generated artifact should carry:
-
-```text
+client_id
 film_id
-object_key
-content_type
-size_bytes
-sha256 checksum
+job_id
+parent_job_id
+operation
 ```
 
-The checksum provides integrity verification before an artifact is promoted to the next production stage.
-
-## Model lifecycle
-
-`ModelManager` lazily loads models inside GPU workers and caches them for reuse. Models can be unloaded to release GPU memory between workloads.
-
-```text
-worker start
-   -> no model loaded
-job arrives
-   -> select stage/model
-   -> lazy load
-   -> execute
-   -> cache for reuse
-   -> optionally unload
-```
-
-## Isolation requirement
-
-AI Film Studio is multi-tenant, but **film data must never cross film boundaries**.
+Authorization happens before execution and before artifact access. Generated artifacts use film-scoped storage keys. The engine must never retrieve context using a global filename or cross-film search.
 
 ```text
 Film A -> Film A jobs -> Film A GPU context -> Film A storage
 Film B -> Film B jobs -> Film B GPU context -> Film B storage
 ```
 
-For high-security client deployments, a separate cloud account/project, storage boundary and GPU worker pool can be provisioned for each film. Shared infrastructure is only acceptable when strict tenant isolation controls are enforced.
+For high-security deployments, a separate cloud account/project, storage boundary and GPU worker pool can be provisioned per film. Shared infrastructure is only acceptable with strict tenant isolation controls.
+
+## Artifact contract
+
+Generated artifacts should carry:
+
+```text
+client_id
+film_id
+job_id
+object_key
+content_type
+size_bytes
+sha256 checksum
+```
+
+The checksum is used for integrity verification before promotion between stages.
 
 ## Multilingual production
 
-- Kannada
-- Hindi
-- Tamil
-- Telugu
-- Malayalam
-- Marathi
-- Bengali
-- English (US)
-- English (UK)
-- Chinese (Mandarin)
-- Japanese
-- French
-
-Localization originates from a versioned master script. Translations and dubbed assets are derived artifacts; the master-language assets are never overwritten.
+The engine supports the configured language catalog including Kannada, Hindi, Tamil, Telugu, Malayalam, Marathi, Bengali, English US/UK, Mandarin, Japanese and French. Localization must derive from a versioned master script; master-language assets are never overwritten.
 
 ## Implementation status
 
-### Implemented
+### Implemented in the existing architecture
 
 - AI stage contracts
-- Provider/model registry
-- Model configuration
+- Film-scoped AI jobs
+- Client/film authorization
+- Request and worker context
+- Job validation
+- Retry/state machine
+- AI job executor
+- Complete AI pipeline orchestration
+- `AIService` application facade
+- Provider/model registry with lazy initialization
+- Model configuration boundaries
 - GPU worker boundary
-- Bounded GPU scheduler
-- Lazy model lifecycle manager
-- GPU health inspection
-- Diffusers/vLLM backend boundaries
+- Film-scoped artifact storage
+- S3 encryption/KMS support
 - Artifact integrity metadata
-- Film-scoped execution contract
-- Multilingual language configuration
-- Structured screenplay analysis
-- Qwen structured-inference adapter boundary
-- Character production bible generation
-- Environment production bible generation
-- Stable visual prompt generation
+- Structured screenplay analysis contracts
+- Character/environment production bibles
 - Storyboard and shot planning
-- Normalized shot prompt generation
+- Stable shot prompt generation
 - Film-scoped image generation contract
-- Image output dimension validation
+- Image output validation
+- Subtitle/lip-sync/film assembly contracts
 
-### Still to integrate
+### Model integrations still deployment-specific
 
-- Live Qwen/vLLM production client
-- Real FLUX/Diffusers pipeline loading and generation
-- Character reference conditioning and LoRA identity consistency
-- HunyuanVideo production video pipeline
-- Shot continuity/quality scoring
-- Whisper transcription worker
-- Translation worker
-- multilingual TTS/voice pipeline
-- lip-sync/dubbing pipeline
-- music generation
-- SFX generation
-- timeline/video assembly
-- 4K/8K enhancement
-- final render and delivery
+The engine deliberately does not download or initialize large models during repository import. A GPU deployment must bind real Qwen/vLLM, Diffusers/FLUX, HunyuanVideo, Whisper, TTS, translation and lip-sync runtimes to the provider registry. This is an infrastructure/deployment step rather than a control-plane dependency.
 
-The code deliberately keeps provider-specific model loading separate from the control plane so models can be upgraded independently.
+The architecture is ready for those runtimes without another repository restructure.
