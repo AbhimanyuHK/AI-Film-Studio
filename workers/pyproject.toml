@@ -1,0 +1,16 @@
+[project]
+name = "ai-film-studio-workers"
+version = "0.1.0"
+description = "Durable asynchronous workers for AI Film Studio"
+requires-python = ">=3.12"
+dependencies = [
+  "asyncpg>=0.30,<1",
+  "httpx>=0.28,<1",
+  "pydantic-settings>=2.7,<3",
+]
+
+[project.scripts]
+film-worker = "workers.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
