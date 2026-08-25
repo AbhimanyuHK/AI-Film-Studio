@@ -1586,3 +1586,562 @@ If we have to spend the GPU budget selectively, I'd prioritize:
 And I would **not call the studio “production ready” until we benchmark the models on 5–10 representative scenes** from *The Centerline*: dialogue close-up, two-person conversation, walking shot, rural landscape, police station, courtroom, action/demolition, emotional scene, night scene, and crowd scene.
 
 That benchmark will tell us whether **Wan vs LTX vs Hunyuan** is actually the right production mix instead of choosing models based only on published demos.
+
+
+**Both.** The AI Film Studio should use a **hybrid execution model**: some stages are strictly sequential because they depend on previous outputs, while many generation jobs should run **in parallel**.
+
+The key is: **don't make the entire 3-hour film pipeline sequential.**
+
+## 1. High-level execution
+
+```text
+                    PROJECT
+                       │
+                       ▼
+                 MASTER SCRIPT
+                       │
+                       ▼
+              STORY / CHARACTERS
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+       Character    Locations      Props
+       Generation   Generation    Generation
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+                 SCENE BREAKDOWN
+                       │
+                       ▼
+                  SHOT PLANNING
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+       Shot 001     Shot 002     Shot 003
+          │            │            │
+          │       PARALLEL         │
+          ▼            ▼            ▼
+       GPU #1       GPU #2       GPU #3
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+                  QA / CONTINUITY
+                       │
+                ┌──────┴──────┐
+                ▼             ▼
+              FAIL           PASS
+                │             │
+                ▼             ▼
+            Regenerate      LOCK
+                              │
+                              ▼
+                         Scene Assembly
+                              │
+                              ▼
+                         Film Assembly
+```
+
+---
+
+# 2. What should be sequential?
+
+Some things **must** happen sequentially.
+
+### Script → scenes → shots
+
+```text
+Script
+  ↓
+Scene breakdown
+  ↓
+Shot list
+```
+
+You can't reliably generate the final shot list before knowing the scene structure.
+
+### Character Bible
+
+```text
+Character design
+       ↓
+Character approval
+       ↓
+Character LoRA/reference
+       ↓
+Shot generation
+```
+
+You want the character identity locked before generating hundreds of shots.
+
+### Location Bible
+
+Same principle:
+
+```text
+Location concept
+       ↓
+Location approval
+       ↓
+Location reference
+       ↓
+Scene generation
+```
+
+---
+
+# 3. What should be parallel?
+
+Once the dependencies are satisfied, **generate as much as possible in parallel**.
+
+For example:
+
+```text
+Scene 12
+│
+├── Shot 121 ── GPU 01
+├── Shot 122 ── GPU 02
+├── Shot 123 ── GPU 03
+├── Shot 124 ── GPU 04
+├── Shot 125 ── GPU 05
+└── Shot 126 ── GPU 06
+```
+
+These don't necessarily need to wait for each other.
+
+---
+
+# 4. Character generation is parallel
+
+Suppose your film has:
+
+```text
+Dhruva
+Inspector
+Judge
+Lawyer
+Police officers
+Villagers
+```
+
+After the character definitions are approved:
+
+```text
+                 Character Pipeline
+                       │
+       ┌───────────────┼───────────────┐
+       ▼               ▼               ▼
+    Dhruva          Inspector         Judge
+       │               │               │
+      GPU             GPU             GPU
+       │               │               │
+       ▼               ▼               ▼
+     LoRA             LoRA             LoRA
+```
+
+Parallel.
+
+---
+
+# 5. Locations are parallel too
+
+```text
+Location Pipeline
+│
+├── Bhujanganagar road
+├── Police station
+├── Courtroom
+├── House
+└── Market
+```
+
+All can be generated simultaneously once the location specifications are finalized.
+
+---
+
+# 6. Video generation is massively parallel
+
+This is where cloud GPUs become valuable.
+
+Suppose you have:
+
+**1,000 shots**
+
+You don't do:
+
+```text
+Shot 1
+ ↓
+Shot 2
+ ↓
+Shot 3
+ ↓
+...
+Shot 1000
+```
+
+That would be painfully slow.
+
+Instead:
+
+```text
+                    1000 SHOTS
+                         │
+                    Job Queue
+                         │
+       ┌─────────────────┼─────────────────┐
+       ▼                 ▼                 ▼
+    Worker 1          Worker 2          Worker 3
+       │                 │                 │
+   20 shots           20 shots           20 shots
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         ▼
+                       S3
+```
+
+With enough GPUs, hundreds of jobs can execute concurrently.
+
+---
+
+# 7. But there's a catch: shot continuity
+
+This is where you **cannot blindly parallelize everything**.
+
+Consider:
+
+```text
+Shot 101
+Dhruva enters the police station.
+
+Shot 102
+Dhruva walks toward Inspector.
+
+Shot 103
+Inspector stands up.
+```
+
+Shot 102 may need information from Shot 101:
+
+```text
+Dhruva's:
+position
+clothing
+lighting
+camera direction
+environment
+```
+
+So you need a **continuity dependency graph**.
+
+---
+
+# 8. Use a DAG
+
+This is the architecture I'd recommend.
+
+```text
+                 Scene 10
+                    │
+             ┌──────┴──────┐
+             ▼             ▼
+          Shot 101       Shot 102
+             │             │
+             └──────┬──────┘
+                    ▼
+                 Shot 103
+                    │
+             ┌──────┴──────┐
+             ▼             ▼
+          Shot 104       Shot 105
+             │             │
+             └──────┬──────┘
+                    ▼
+                 Shot 106
+```
+
+So:
+
+**Independent shots → parallel**
+
+**Dependent shots → sequential**
+
+---
+
+# 9. Example from your film
+
+Imagine a courtroom sequence:
+
+```text
+Scene 45
+Courtroom
+│
+├── Establishing shot
+│
+├── Judge close-up
+│
+├── Dhruva close-up
+│
+├── Inspector close-up
+│
+├── Lawyer
+│
+├── Judge dialogue
+│
+├── Dhruva reaction
+│
+└── Courtroom wide
+```
+
+Some can be generated concurrently:
+
+```text
+Judge close-up ───── GPU 1
+Dhruva close-up ──── GPU 2
+Inspector ────────── GPU 3
+Lawyer ───────────── GPU 4
+```
+
+But the **dialogue/reaction timing and continuity** should be coordinated afterward.
+
+---
+
+# 10. Audio can run in parallel with video
+
+This is another major optimization.
+
+You don't need:
+
+```text
+Video
+ ↓
+Voice
+ ↓
+Music
+```
+
+Instead:
+
+```text
+                  Scene
+                    │
+          ┌─────────┼─────────┐
+          ▼         ▼         ▼
+        Video     Dialogue   Music
+          │         │         │
+          ▼         ▼         ▼
+        Video      WAV       WAV
+          │         │         │
+          └─────────┼─────────┘
+                    ▼
+                  Mix
+```
+
+Voice generation can happen while video generation is running.
+
+---
+
+# 11. QA is sequential relative to generation
+
+For each shot:
+
+```text
+Generate
+   ↓
+QA
+   ↓
+PASS / FAIL
+```
+
+You shouldn't QA a shot before it exists.
+
+But **QA for multiple completed shots can run in parallel**:
+
+```text
+Shot 101 ──→ QA Worker 1
+Shot 102 ──→ QA Worker 2
+Shot 103 ──→ QA Worker 3
+Shot 104 ──→ QA Worker 4
+```
+
+---
+
+# 12. Regeneration is asynchronous
+
+Suppose:
+
+```text
+100 shots generated
+```
+
+QA finds:
+
+```text
+78 PASS
+15 REVIEW
+7 FAIL
+```
+
+Don't stop the entire pipeline.
+
+Do:
+
+```text
+78 → LOCK
+
+15 → Human review
+
+7 → Regeneration queue
+```
+
+The 7 failed shots can regenerate while other scenes continue.
+
+---
+
+# 13. The entire film therefore behaves like a DAG
+
+This is the most important architectural concept.
+
+```text
+                         SCRIPT
+                           │
+                    ┌──────┴──────┐
+                    ▼             ▼
+              CHARACTER         LOCATION
+                 PIPE             PIPE
+                    │             │
+                    └──────┬──────┘
+                           ▼
+                      SCENE PLAN
+                           │
+             ┌─────────────┼─────────────┐
+             ▼             ▼             ▼
+          Scene 1       Scene 2       Scene 3
+             │             │             │
+        ┌────┼────┐   ┌────┼────┐   ┌────┼────┐
+        ▼    ▼    ▼   ▼    ▼    ▼   ▼    ▼    ▼
+       S1   S2   S3  S1   S2   S3  S1   S2   S3
+        │    │    │   │    │    │   │    │    │
+        └────┼────┘   └────┼────┘   └────┼────┘
+             │             │             │
+             ▼             ▼             ▼
+             QA            QA            QA
+             │             │             │
+             └─────────────┼─────────────┘
+                           ▼
+                     Scene Assembly
+                           │
+                           ▼
+                     Film Assembly
+```
+
+---
+
+# 14. LangGraph vs Celery
+
+This distinction is important.
+
+### LangGraph
+
+Should manage:
+
+> **AI reasoning / decision workflow**
+
+```text
+"What should happen next?"
+```
+
+### Celery / Temporal
+
+Should manage:
+
+> **actual distributed compute**
+
+```text
+"Run this video generation job on GPU #12."
+```
+
+So:
+
+```text
+             LangGraph
+            AI Director
+                 │
+                 ▼
+           Job Dispatcher
+                 │
+                 ▼
+        Redis / Temporal
+                 │
+       ┌─────────┼─────────┐
+       ▼         ▼         ▼
+     GPU 1     GPU 2     GPU 3
+```
+
+Don't make LangGraph itself responsible for thousands of GPU jobs.
+
+---
+
+# 15. Recommended execution strategy
+
+For your AI Film Studio:
+
+### Sequential
+
+* Story development
+* Character definition
+* Location definition
+* Scene planning
+* Dependency resolution
+* Shot generation where continuity requires previous-shot information
+* QA after generation
+* Final scene/timeline assembly
+
+### Parallel
+
+* Character asset generation
+* Location generation
+* Props
+* Independent shot generation
+* Voice generation
+* Music generation
+* SFX generation
+* QA across completed shots
+* Upscaling of approved shots
+* Failed-shot regeneration
+* Rendering/export jobs
+
+---
+
+## The ideal architecture
+
+**Not:**
+
+```text
+Everything → Sequential
+```
+
+and not:
+
+```text
+Everything → Parallel
+```
+
+but:
+
+```text
+              DEPENDENCY GRAPH
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+    Sequential   Parallel      Parallel
+    dependencies  generation   generation
+        │            │            │
+        └────────────┼────────────┘
+                     ▼
+                 QA / Lock
+                     │
+                     ▼
+               Next dependency
+```
+
+This is exactly why I would use **LangGraph + a proper distributed job queue + cloud GPU workers** for your architecture. The AI decides **what should happen**, while the compute layer decides **where and when it should run**.
