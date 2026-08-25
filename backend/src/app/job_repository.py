@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
@@ -24,8 +24,24 @@ class PostgresJobRepository:
         result = await self.session.execute(select(JobModel).where(JobModel.film_id == film_id).order_by(JobModel.created_at))
         return list(result.scalars().all())
 
+    async def recover_stale_running(self, lease_seconds: int = 900) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=lease_seconds)
+        result = await self.session.execute(
+            text("""
+                UPDATE jobs
+                SET status = CASE WHEN attempts < max_attempts THEN 'retrying' ELSE 'failed' END,
+                    error_code = 'worker_lease_expired',
+                    updated_at = now()
+                WHERE status = 'running' AND started_at < :cutoff
+                RETURNING job_id
+            """),
+            {"cutoff": cutoff},
+        )
+        count = len(result.fetchall())
+        await self.session.flush()
+        return count
+
     async def claim_next_ready(self) -> JobModel | None:
-        """Atomically claim one runnable job; PostgreSQL SKIP LOCKED makes this safe for many workers."""
         result = await self.session.execute(
             text("""
                 SELECT j.job_id
@@ -34,15 +50,12 @@ class PostgresJobRepository:
                   AND j.scheduled_at <= now()
                   AND j.attempts < j.max_attempts
                   AND NOT EXISTS (
-                    SELECT 1
-                    FROM job_dependencies d
+                    SELECT 1 FROM job_dependencies d
                     JOIN jobs dep ON dep.job_id = d.depends_on_job_id
-                    WHERE d.job_id = j.job_id
-                      AND dep.status <> 'completed'
+                    WHERE d.job_id = j.job_id AND dep.status <> 'completed'
                   )
                 ORDER BY j.created_at
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1
+                FOR UPDATE SKIP LOCKED LIMIT 1
             """)
         )
         row = result.first()
@@ -51,10 +64,11 @@ class PostgresJobRepository:
         job = await self.session.get(JobModel, row[0])
         if job is None:
             return None
+        now = datetime.now(timezone.utc)
         job.status = "running"
         job.attempts += 1
-        job.started_at = datetime.now(timezone.utc)
-        job.updated_at = job.started_at
+        job.started_at = now
+        job.updated_at = now
         await self.session.flush()
         return job
 
