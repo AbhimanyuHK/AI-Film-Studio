@@ -10,7 +10,8 @@ import httpx
 DATABASE_URL = os.environ["DATABASE_URL"]
 AI_ENGINE_URL = os.getenv("AI_ENGINE_URL", "http://ai-engine:8080").rstrip("/")
 FILM_RUNTIME_URL_TEMPLATE = os.getenv("FILM_RUNTIME_URL_TEMPLATE", "").strip().rstrip("/")
-INTERNAL_SHARED_SECRET = os.getenv("AI_ENGINE_SHARED_SECRET", "")
+AI_ENGINE_SHARED_SECRET = os.getenv("AI_ENGINE_SHARED_SECRET", "")
+FILM_RUNTIME_SHARED_SECRET = os.getenv("FILM_RUNTIME_SHARED_SECRET", "")
 WORKER_ID = os.getenv("WORKER_ID", socket.gethostname())
 POLL_SECONDS = float(os.getenv("WORKER_POLL_SECONDS", "2"))
 LEASE_SECONDS = int(os.getenv("WORKER_LEASE_SECONDS", "300"))
@@ -114,17 +115,18 @@ async def execute(pool, job):
         "payload": payload,
     }
     target = runtime_url(job)
-    headers = {"X-Internal-Secret": INTERNAL_SHARED_SECRET} if INTERNAL_SHARED_SECRET else {}
     if target:
-        headers.update(
-            {
-                "X-Client-Id": str(job["client_id"]),
-                "X-Film-Id": str(job["film_id"]),
-                "X-Environment-Id": str(job["environment_id"]),
-            }
-        )
+        headers = {
+            "X-Internal-Secret": FILM_RUNTIME_SHARED_SECRET,
+            "X-Client-Id": str(job["client_id"]),
+            "X-Film-Id": str(job["film_id"]),
+            "X-Environment-Id": str(job["environment_id"]),
+        }
+        url = f"{target}/v1/jobs/execute"
+    else:
+        headers = {"X-Internal-Secret": AI_ENGINE_SHARED_SECRET} if AI_ENGINE_SHARED_SECRET else {}
+        url = f"{AI_ENGINE_URL}/v1/jobs/execute"
     try:
-        url = f"{target}/v1/jobs/execute" if target else f"{AI_ENGINE_URL}/v1/jobs/execute"
         async with httpx.AsyncClient(timeout=1800) as client:
             response = await client.post(url, json=body, headers=headers)
             response.raise_for_status()
