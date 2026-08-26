@@ -104,7 +104,7 @@ class PostgresRepository:
                 client_id=client_id,
                 film_id=film_id,
                 environment_id=environment_id,
-                metadata=metadata or {},
+                metadata_json=metadata or {},
             )
         )
         await self.session.flush()
