@@ -20,7 +20,7 @@ resource "aws_db_instance" "film" {
   deletion_protection         = var.db_deletion_protection
   skip_final_snapshot         = false
   final_snapshot_identifier   = "${var.name_prefix}-${var.film_id}-final"
-  vpc_security_group_ids     = [aws_security_group.rds.id]
+  vpc_security_group_ids      = [aws_security_group.rds.id]
 }
 
 resource "aws_subnet" "private_a" {
