@@ -25,6 +25,8 @@ services:
     environment:
       AI_ENGINE_HOST: 0.0.0.0
       AI_ENGINE_PORT: 8080
+      AI_EXECUTOR_FACTORY: ai_engine.integration_executor:build_integration_executor
+      AI_ENGINE_SHARED_SECRET: local-internal-secret
     ports:
       - "8080:8080"
 
@@ -74,6 +76,7 @@ services:
     environment:
       DATABASE_URL: postgresql://studio:studio@postgres:5432/ai_film_studio
       AI_ENGINE_URL: http://ai-engine:8080
+      AI_ENGINE_SHARED_SECRET: local-internal-secret
       FILM_RUNTIME_URL_TEMPLATE: ""
       WORKER_POLL_SECONDS: 2
       WORKER_LEASE_SECONDS: 300
