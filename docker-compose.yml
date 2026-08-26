@@ -10,7 +10,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/001_control_plane.sql:/docker-entrypoint-initdb.d/001_control_plane.sql:ro
+      - ./database/002_film_database_template.sql:/docker-entrypoint-initdb.d/002_film_database_template.sql:ro
       - ./database/003_integrity_and_worker.sql:/docker-entrypoint-initdb.d/003_integrity_and_worker.sql:ro
+      - ./database/004_environments_and_dependencies.sql:/docker-entrypoint-initdb.d/004_environments_and_dependencies.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U studio -d ai_film_studio"]
       interval: 5s
@@ -26,10 +28,34 @@ services:
     ports:
       - "8080:8080"
 
+  film-runtime:
+    build:
+      context: ./film-runtime
+    environment:
+      FILM_RUNTIME_HOST: 0.0.0.0
+      FILM_RUNTIME_PORT: 8081
+      RUNTIME_CLIENT_ID: 00000000-0000-0000-0000-000000000001
+      RUNTIME_FILM_ID: 00000000-0000-0000-0000-000000000002
+      RUNTIME_ENVIRONMENT_ID: 00000000-0000-0000-0000-000000000003
+      RUNTIME_SHARED_SECRET: local-development-secret
+      DATABASE_URL: postgresql+asyncpg://studio:studio@postgres:5432/ai_film_studio
+      AI_ENGINE_URL: http://ai-engine:8080
+      S3_BUCKET: ""
+      S3_PREFIX: local/films
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-engine:
+        condition: service_started
+    ports:
+      - "8081:8081"
+
   backend:
     build:
       context: ./backend
     environment:
+      APP_ENV: development
+      AUTH_MODE: development
       DATABASE_URL: postgresql+asyncpg://studio:studio@postgres:5432/ai_film_studio
       AI_ENGINE_URL: http://ai-engine:8080
       AI_ENGINE_TIMEOUT_SECONDS: 300
@@ -48,23 +74,16 @@ services:
     environment:
       DATABASE_URL: postgresql://studio:studio@postgres:5432/ai_film_studio
       AI_ENGINE_URL: http://ai-engine:8080
+      FILM_RUNTIME_URL_TEMPLATE: ""
       WORKER_POLL_SECONDS: 2
       WORKER_LEASE_SECONDS: 300
+      WORKER_RECOVERY_SECONDS: 30
       WORKER_ID: docker-worker
     depends_on:
       postgres:
         condition: service_healthy
       ai-engine:
         condition: service_started
-
-  film-runtime:
-    build:
-      context: ./film-runtime
-    environment:
-      FILM_RUNTIME_HOST: 0.0.0.0
-      FILM_RUNTIME_PORT: 8081
-    ports:
-      - "8081:8081"
 
   frontend:
     build:
