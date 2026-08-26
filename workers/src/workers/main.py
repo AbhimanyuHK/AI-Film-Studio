@@ -10,6 +10,7 @@ import httpx
 DATABASE_URL = os.environ["DATABASE_URL"]
 AI_ENGINE_URL = os.getenv("AI_ENGINE_URL", "http://ai-engine:8080").rstrip("/")
 FILM_RUNTIME_URL_TEMPLATE = os.getenv("FILM_RUNTIME_URL_TEMPLATE", "").strip().rstrip("/")
+INTERNAL_SHARED_SECRET = os.getenv("AI_ENGINE_SHARED_SECRET", "")
 WORKER_ID = os.getenv("WORKER_ID", socket.gethostname())
 POLL_SECONDS = float(os.getenv("WORKER_POLL_SECONDS", "2"))
 LEASE_SECONDS = int(os.getenv("WORKER_LEASE_SECONDS", "300"))
@@ -72,9 +73,7 @@ async def finish(pool, job_id, *, result=None, error=None, retry=False):
                     worker_id=NULL, lease_until=NULL, error_code=$2, updated_at=now()
                 WHERE job_id=$1 AND worker_id=$3
                 """,
-                job_id,
-                error,
-                WORKER_ID,
+                job_id, error, WORKER_ID,
             )
         elif error:
             await conn.execute(
@@ -84,10 +83,7 @@ async def finish(pool, job_id, *, result=None, error=None, retry=False):
                     error_code=$2, result=$3::jsonb, completed_at=now(), updated_at=now()
                 WHERE job_id=$1 AND worker_id=$4
                 """,
-                job_id,
-                error,
-                json.dumps(result or {}),
-                WORKER_ID,
+                job_id, error, json.dumps(result or {}), WORKER_ID,
             )
         else:
             await conn.execute(
@@ -97,18 +93,14 @@ async def finish(pool, job_id, *, result=None, error=None, retry=False):
                     result=$2::jsonb, completed_at=now(), updated_at=now()
                 WHERE job_id=$1 AND worker_id=$3
                 """,
-                job_id,
-                json.dumps(result or {}),
-                WORKER_ID,
+                job_id, json.dumps(result or {}), WORKER_ID,
             )
 
 
 def runtime_url(job: dict) -> str | None:
     if not FILM_RUNTIME_URL_TEMPLATE:
         return None
-    return FILM_RUNTIME_URL_TEMPLATE.format(
-        film_id=job["film_id"], environment_id=job["environment_id"]
-    )
+    return FILM_RUNTIME_URL_TEMPLATE.format(film_id=job["film_id"], environment_id=job["environment_id"])
 
 
 async def execute(pool, job):
@@ -121,14 +113,12 @@ async def execute(pool, job):
         "operation": job["job_type"],
         "payload": payload,
     }
+    headers = {"X-Internal-Secret": INTERNAL_SHARED_SECRET} if INTERNAL_SHARED_SECRET else {}
     try:
         target = runtime_url(job)
-        if target:
-            url = f"{target}/v1/jobs/execute"
-        else:
-            url = f"{AI_ENGINE_URL}/v1/jobs/execute"
+        url = f"{target}/v1/jobs/execute" if target else f"{AI_ENGINE_URL}/v1/jobs/execute"
         async with httpx.AsyncClient(timeout=1800) as client:
-            response = await client.post(url, json=body)
+            response = await client.post(url, json=body, headers=headers)
             response.raise_for_status()
             data = response.json()
         if not isinstance(data, dict):
