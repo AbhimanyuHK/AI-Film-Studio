@@ -4,7 +4,7 @@ import importlib
 import os
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 
@@ -24,8 +24,8 @@ class JobExecutionResponse(BaseModel):
 
 
 def _load_executor() -> Callable[[JobExecutionRequest], Any]:
-    target = os.getenv("AI_EXECUTOR_FACTORY")
-    if not target or ":" not in target:
+    target = os.getenv("AI_EXECUTOR_FACTORY", "ai_engine.integration_executor:build_integration_executor")
+    if ":" not in target:
         raise RuntimeError("AI_EXECUTOR_FACTORY must be configured as module:function")
     module_name, function_name = target.split(":", 1)
     factory = getattr(importlib.import_module(module_name), function_name)
@@ -44,7 +44,13 @@ def health() -> dict[str, str]:
 
 
 @app.post("/v1/jobs/execute", response_model=JobExecutionResponse)
-def execute_job(request: JobExecutionRequest) -> JobExecutionResponse:
+def execute_job(
+    request: JobExecutionRequest,
+    x_internal_secret: str | None = Header(default=None),
+) -> JobExecutionResponse:
+    expected_secret = os.getenv("AI_ENGINE_SHARED_SECRET", "")
+    if expected_secret and x_internal_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="Invalid internal service credential")
     if not request.job_id or not request.client_id or not request.film_id or not request.environment_id:
         raise HTTPException(status_code=422, detail="job_id, client_id, film_id and environment_id are required")
     if not request.operation:
