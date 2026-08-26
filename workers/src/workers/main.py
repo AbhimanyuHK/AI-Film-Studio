@@ -113,9 +113,17 @@ async def execute(pool, job):
         "operation": job["job_type"],
         "payload": payload,
     }
+    target = runtime_url(job)
     headers = {"X-Internal-Secret": INTERNAL_SHARED_SECRET} if INTERNAL_SHARED_SECRET else {}
+    if target:
+        headers.update(
+            {
+                "X-Client-Id": str(job["client_id"]),
+                "X-Film-Id": str(job["film_id"]),
+                "X-Environment-Id": str(job["environment_id"]),
+            }
+        )
     try:
-        target = runtime_url(job)
         url = f"{target}/v1/jobs/execute" if target else f"{AI_ENGINE_URL}/v1/jobs/execute"
         async with httpx.AsyncClient(timeout=1800) as client:
             response = await client.post(url, json=body, headers=headers)
