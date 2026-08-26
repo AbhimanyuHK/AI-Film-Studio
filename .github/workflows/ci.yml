@@ -33,7 +33,7 @@ jobs:
           python-version: "3.12"
       - name: Install engine
         working-directory: ai-engine
-        run: pip install -e .
+        run: pip install -e .[test]
       - name: Test engine
         working-directory: ai-engine
         run: pytest -q
@@ -90,7 +90,10 @@ jobs:
         uses: hashicorp/setup-terraform@v3
       - name: Terraform format
         working-directory: terraform
-        run: terraform fmt -check -recursive
+        run: terraform fmt -recursive
+      - name: Verify Terraform formatting
+        working-directory: terraform
+        run: git diff --exit-code -- '*.tf'
       - name: Terraform init
         working-directory: terraform
         run: terraform init -backend=false -input=false
