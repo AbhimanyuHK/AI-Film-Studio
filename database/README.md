@@ -12,7 +12,7 @@ The database layer provides durable control-plane state and isolated film-enviro
              PostgreSQL                PostgreSQL
                  │                         │
         clients / films / jobs     scenes / shots / assets
-        audit / worker leases      film production state
+        environments / audit       film production state
                  │                         │
                  └────────────┬────────────┘
                               │
@@ -22,22 +22,34 @@ The database layer provides durable control-plane state and isolated film-enviro
                     Film-scoped S3 storage
 ```
 
-## Database boundaries
+## Migration order
 
-### Control plane
+```text
+001_control_plane.sql
+        ↓
+002_film_database_template.sql
+        ↓
+003_integrity_and_worker.sql
+        ↓
+004_environments_and_dependencies.sql
+```
 
-`001_control_plane.sql` defines durable platform state:
+For production, apply these through the deployment/migration mechanism in exactly this order.
+
+## Control plane
+
+`001_control_plane.sql` defines:
 
 - `clients`
 - `films`
 - `jobs`
 - `audit_events`
 
-The control plane stores identifiers, operational state, authorization scope, job metadata and audit information. It is not a shared repository for film content.
+The control plane stores identifiers, operational state, authorization scope, job metadata and audit information. It is not a shared repository for large film content.
 
-### Film environment
+## Film environment
 
-`002_film_database_template.sql` defines the schema template for an isolated film environment:
+`002_film_database_template.sql` defines the isolated film data boundary:
 
 - `film_metadata`
 - `characters`
@@ -46,35 +58,64 @@ The control plane stores identifiers, operational state, authorization scope, jo
 - `production_jobs`
 - `film_assets`
 
-A production deployment can provision this schema in a separate PostgreSQL database or an equivalent isolated PostgreSQL boundary for each film environment.
+Production can provision this schema in a separate PostgreSQL database for each film environment.
 
-## Job queue hardening
+## Queue and worker hardening
 
-`003_integrity_and_worker.sql` adds production queue protections:
+`003_integrity_and_worker.sql` adds:
 
 - worker ownership
-- worker lease expiration
+- lease expiration
 - retry counters
 - idempotency keys
-- claimable-job indexes
+- queue indexes
 - worker-lease indexes
-- status constraints
-- client/film status constraints
+- valid job status constraints
 - automatic `updated_at` triggers
 
-The worker claim pattern is transactional:
+Workers claim jobs with PostgreSQL row locking and `SKIP LOCKED` so multiple workers can safely consume the same queue.
 
-```sql
-SELECT ...
-FROM jobs
-WHERE status IN ('queued', 'retrying')
-  AND scheduled_at <= now()
-  AND (lease_until IS NULL OR lease_until < now())
-ORDER BY scheduled_at
-FOR UPDATE SKIP LOCKED;
+## Environments and dependency graph
+
+`004_environments_and_dependencies.sql` adds the missing control-plane relationships:
+
+- `film_environments`
+- `deployments`
+- `job_dependencies`
+- film source/target language fields
+- lease recovery function
+
+A production film must have an environment before production jobs can be started.
+
+The film pipeline is represented as a DAG:
+
+```text
+script_analysis
+   ├── character_generation
+   ├── environment_generation
+   ├── voice_generation
+   ├── translation
+   └── music_generation
+          │
+character + environment + script
+          ↓
+      storyboard
+          ↓
+    shot_generation
+          ↓
+    video_generation
+          ↓
+editing ← dubbing ← voice + translation
+   ↑          ↑
+ music       sfx
+   │
+   ↓
+upscaling
+   ↓
+final_render
 ```
 
-The selected row is then marked `running` with a worker ID and lease in the same transaction.
+A job is eligible only when all declared dependency jobs have completed successfully.
 
 ## Job lifecycle
 
@@ -88,20 +129,20 @@ RUNNING ───────────────► COMPLETED
   │
   └── terminal error ──► FAILED
 
-RUNNING ── cancellation ──► CANCELLED
+RUNNING ── lease expires ──► RETRYING / FAILED
+
+QUEUED / RETRYING ── cancellation ──► CANCELLED
 ```
 
-The database is the durable source of job state, so an API or worker restart does not lose the production queue.
+Worker leases make crash recovery deterministic. A worker that disappears does not permanently strand a job.
 
 ## Idempotency
 
-AI jobs may be retried because GPU workers, provider services or network calls can fail. The control plane therefore supports an optional `idempotency_key` scoped to a film.
-
-Repeated submission of the same logical job can be detected without creating duplicate work.
+AI jobs support an optional film-scoped `idempotency_key`. Repeated requests with the same key return the existing logical job instead of creating duplicate work.
 
 ## Storage boundary
 
-Large media files must not be stored in PostgreSQL.
+Large media files are not stored in PostgreSQL.
 
 ```text
 Film database
@@ -122,73 +163,44 @@ Recommended object-key structure:
 clients/{client_id}/films/{film_id}/environments/{environment_id}/assets/{asset_id}/...
 ```
 
-The application must derive and validate this scope from the authenticated principal rather than trusting arbitrary client/film IDs supplied by the browser.
-
 ## Backend integration
 
-The backend uses SQLAlchemy against PostgreSQL. The SQLAlchemy Declarative API reserves the Python attribute name `metadata`; therefore application models use `metadata_json` where necessary while PostgreSQL can retain the column name `metadata`.
+The backend uses SQLAlchemy 2.x with asyncpg. SQLAlchemy's Declarative API reserves the Python attribute name `metadata`, so the backend maps the PostgreSQL `metadata` column to the Python attribute `metadata_json`.
 
-The backend currently uses async SQLAlchemy/`asyncpg`. fileciteturn212file0L2-L2
+Film records persist `source_language` and `target_languages`, environments persist their AWS deployment identity, and jobs persist worker lease/idempotency state.
 
-## Initialization
-
-Development control-plane database:
+## Development initialization
 
 ```bash
 psql "$DATABASE_URL" -f database/001_control_plane.sql
+psql "$DATABASE_URL" -f database/002_film_database_template.sql
 psql "$DATABASE_URL" -f database/003_integrity_and_worker.sql
+psql "$DATABASE_URL" -f database/004_environments_and_dependencies.sql
 ```
 
-Development film environment:
+The root Docker Compose stack mounts the same ordered migrations into PostgreSQL initialization.
 
-```bash
-psql "$FILM_DATABASE_URL" -f database/002_film_database_template.sql
-```
+## Production requirements
 
-Production environments should run these definitions through a versioned migration mechanism rather than applying arbitrary SQL manually.
+1. Use a managed PostgreSQL service.
+2. Do not use development credentials.
+3. Keep PostgreSQL private; expose only the application connection path.
+4. Store credentials in a secret manager.
+5. Back up and regularly test restoration.
+6. Apply migrations transactionally/versionedly.
+7. Enforce film/client authorization in the API and runtime.
+8. Store media in scoped object storage rather than PostgreSQL.
+9. Use job leases and idempotency for every asynchronous production workload.
 
 ## Technology stack
 
-- PostgreSQL
+- PostgreSQL 16+
 - SQLAlchemy 2.x
 - asyncpg
-- Alembic-compatible migrations
 - JSONB
 - UUID / `pgcrypto`
 - PostgreSQL row-level locking
 - `FOR UPDATE SKIP LOCKED`
-- Transactional worker leases
+- Worker leases
+- Idempotent job submission
 - S3/object storage for generated media
-
-## Data isolation rules
-
-1. Every film belongs to exactly one client.
-2. Every AI job carries client/film/environment scope.
-3. Film production state belongs to the film environment.
-4. Generated media remains outside PostgreSQL.
-5. Object keys are film/environment scoped.
-6. Cross-client and cross-film access is rejected at the application authorization boundary.
-7. Audit events remain in the central control plane.
-8. Worker claims must be transactional.
-9. Retried jobs must be idempotency-aware.
-10. Stale worker leases must be recoverable.
-
-## Database readiness
-
-The database layer now provides the schema foundation required by the complete platform flow:
-
-```text
-Frontend
-   ↓
-FastAPI Backend
-   ↓
-PostgreSQL
-   ↓
-Persistent AI Job Worker
-   ↓
-AI Engine
-   ↓
-GPU / Models
-   ↓
-S3 Film Artifacts
-```
