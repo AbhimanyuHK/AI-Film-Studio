@@ -1,0 +1,36 @@
+AI-Film-Studio Proprietary License
+Copyright (c) 2026 Abhimanyu HK
+All rights reserved.
+
+1. OWNERSHIP
+This repository, its source code, documentation, architecture, configuration, models configuration, scripts, designs, and other original materials are proprietary and confidential intellectual property of the copyright holder, except for third-party components that are separately identified and licensed by their respective owners.
+
+2. NO LICENSE GRANTED
+No license, permission, or other right is granted to use, copy, modify, merge, publish, distribute, sublicense, sell, lease, host, deploy, reproduce, create derivative works from, or commercially exploit this software or any substantial portion of it, except with prior written permission from the copyright holder.
+
+3. PROHIBITED USE
+Without prior written authorization, you may not:
+- modify or create derivative versions of the project;
+- deploy, host, or operate the project or a modified version of it for yourself or for third parties;
+- use the project as a production service, SaaS, managed service, or commercial offering;
+- redistribute source code or substantial portions of the repository;
+- remove or alter copyright, ownership, or license notices;
+- use the project to provide a service that exposes or reproduces its proprietary functionality.
+
+4. EVALUATION / VIEWING
+Viewing the publicly available repository and downloading it for personal inspection or evaluation does not transfer ownership or grant the rights listed above. Any use beyond evaluation requires written authorization.
+
+5. THIRD-PARTY SOFTWARE AND MODELS
+This license does not replace or override licenses applicable to third-party dependencies, libraries, datasets, model weights, APIs, or other externally supplied materials. Those components remain subject to their respective licenses and terms.
+
+6. SECURITY AND DEPLOYMENT
+Unauthorized deployment is prohibited. The copyright holder does not authorize deployment of this project into production, public infrastructure, or third-party environments without written permission and appropriate security, licensing, infrastructure, and compliance review.
+
+7. NO WARRANTY
+THE PROJECT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, TO THE MAXIMUM EXTENT PERMITTED BY LAW. THE COPYRIGHT HOLDER IS NOT LIABLE FOR CLAIMS, DAMAGES, OR OTHER LIABILITY ARISING FROM UNAUTHORIZED USE, MODIFICATION, OR DEPLOYMENT.
+
+8. WRITTEN PERMISSION
+For commercial use, modification, deployment, redistribution, integration, licensing, or other uses not expressly permitted above, contact the copyright holder to obtain a separate written license or authorization.
+
+9. GOVERNING LAW
+Any interpretation and enforcement of this license are subject to applicable law and any separate written agreement between the parties.
