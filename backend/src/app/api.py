@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.auth import Principal, get_principal
+from app.auth import Principal, get_principal, require_platform_admin
 from app.postgres_repository_protocol import Repository
 from app.repository_factory import get_repository
 
@@ -46,7 +46,7 @@ def _authorize_client(principal: Principal, client_id: UUID) -> None:
 @router.post("/clients", response_model=Client, status_code=status.HTTP_201_CREATED)
 async def create_client(
     payload: ClientCreate,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(require_platform_admin),
     repository: Repository = Depends(get_repository),
 ) -> Client:
     record = await repository.create_client(payload.name)
