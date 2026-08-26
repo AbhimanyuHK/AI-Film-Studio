@@ -24,7 +24,33 @@ class FilmModel(Base):
     film_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     client_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("clients.client_id"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    source_language: Mapped[str] = mapped_column(String(20), nullable=False, default="en")
+    target_languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FilmEnvironmentModel(Base):
+    __tablename__ = "film_environments"
+    environment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    film_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("films.film_id", ondelete="CASCADE"), nullable=False, unique=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="aws")
+    aws_account_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    aws_region: Mapped[str] = mapped_column(String(32), nullable=False)
+    subdomain: Mapped[str] = mapped_column(String(63), nullable=False, unique=True)
+    terraform_state_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="provisioning")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeploymentModel(Base):
+    __tablename__ = "deployments"
+    deployment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    environment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("film_environments.environment_id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -32,7 +58,7 @@ class FilmModel(Base):
 class JobModel(Base):
     __tablename__ = "jobs"
     job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
-    film_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("films.film_id"), nullable=False)
+    film_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("films.film_id", ondelete="CASCADE"), nullable=False)
     environment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     job_type: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
@@ -44,6 +70,10 @@ class JobModel(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
