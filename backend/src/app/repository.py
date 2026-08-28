@@ -20,21 +20,21 @@ class FilmRecord:
 
 
 class InMemoryRepository:
-    """Repository interface implementation used until the Postgres adapter lands."""
+    """Async repository implementation for local/unit-test execution."""
 
     def __init__(self) -> None:
         self.clients: dict[UUID, ClientRecord] = {}
         self.films: dict[UUID, FilmRecord] = {}
 
-    def create_client(self, name: str) -> ClientRecord:
+    async def create_client(self, name: str) -> ClientRecord:
         record = ClientRecord(client_id=uuid4(), name=name)
         self.clients[record.client_id] = record
         return record
 
-    def get_client(self, client_id: UUID) -> ClientRecord | None:
+    async def get_client(self, client_id: UUID) -> ClientRecord | None:
         return self.clients.get(client_id)
 
-    def create_film(
+    async def create_film(
         self,
         client_id: UUID,
         name: str,
@@ -51,5 +51,22 @@ class InMemoryRepository:
         self.films[record.film_id] = record
         return record
 
-    def get_film(self, film_id: UUID) -> FilmRecord | None:
+    async def get_film(self, film_id: UUID) -> FilmRecord | None:
         return self.films.get(film_id)
+
+    async def list_films_for_client(self, client_id: UUID) -> list[FilmRecord]:
+        return [film for film in self.films.values() if film.client_id == client_id]
+
+    async def write_audit_event(
+        self,
+        *,
+        actor_id: str,
+        action: str,
+        outcome: str,
+        client_id: UUID | None = None,
+        film_id: UUID | None = None,
+        environment_id: UUID | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        # Audit persistence is intentionally a no-op for in-memory test execution.
+        return None
