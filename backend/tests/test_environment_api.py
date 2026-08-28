@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Actor-ID": "ci-test-suite"})
 
 
 def create_film() -> str:
