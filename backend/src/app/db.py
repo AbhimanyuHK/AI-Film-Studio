@@ -18,3 +18,12 @@ async def get_db() -> AsyncIterator[AsyncSession]:
         raise RuntimeError("DATABASE_URL is required for database-backed execution")
     async with session_factory() as session:
         yield session
+
+
+async def get_optional_db() -> AsyncIterator[AsyncSession | None]:
+    """Yield a database session when configured, otherwise None for local tests."""
+    if session_factory is None:
+        yield None
+        return
+    async with session_factory() as session:
+        yield session
