@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Actor-ID": "ci-test-suite"})
 
 
 def test_create_client_and_film() -> None:
